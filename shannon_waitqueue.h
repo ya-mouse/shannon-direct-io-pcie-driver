@@ -30,6 +30,7 @@ extern void __shannon_init_waitqueue_head(shannon_wait_queue_head_t *q, struct s
 extern int shannon_waitqueue_active(shannon_wait_queue_head_t *q);
 extern void shannon_prepare_to_wait(shannon_wait_queue_head_t *q, shannon_wait_queue_t *wait, int state);
 extern void shannon_finish_wait(shannon_wait_queue_head_t *q, shannon_wait_queue_t *wait);
+extern void shannon_add_wait_queue(shannon_wait_queue_head_t *q, shannon_wait_queue_t *wait);
 
 extern int shannon_autoremove_wake_function(shannon_wait_queue_t *wait, unsigned mode, int sync, void *key);
 

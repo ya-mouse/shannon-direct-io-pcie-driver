@@ -106,20 +106,44 @@ void shannon_cond_resched(void)
 
 int set_thread_normal(void)
 {
+	/*
+	 * Since 5.9:
+	 *   https://github.com/torvalds/linux/commit/616d91b68cd56bcb1954b6a5af7d542401fde772
+	 *   https://github.com/torvalds/linux/commit/c9ec0524706e580c78c61e38ef5e7761ed2f8485
+	 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
+	sched_set_normal(current, 0);
+	return 0;
+#else
 	struct sched_param param = { .sched_priority = 0 };
 	return sched_setscheduler(current, SCHED_NORMAL, &param);
+#endif
 }
 
 int set_thread_highest_prio_normal(void)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
+	sched_set_normal(current, MAX_PRIO - 1);
+	return 0;
+#else
 	struct sched_param param = { .sched_priority = MAX_PRIO - 1 };
 	return sched_setscheduler(current, SCHED_NORMAL, &param);
+#endif
 }
 
 int set_thread_rt(void)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
+	sched_set_normal(current, MAX_RT_PRIO - 1);
+	return 0;
+#else
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
+	struct sched_param param = { .sched_priority = MAX_RT_PRIO-1 };
+#else
 	struct sched_param param = { .sched_priority = MAX_USER_RT_PRIO-1 };
+#endif
 	return sched_setscheduler(current, SCHED_FIFO, &param);
+#endif
 }
 
 //  kthread.h

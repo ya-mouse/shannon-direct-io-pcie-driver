@@ -6,9 +6,19 @@
 #include <linux/sched.h>
 #include <asm/uaccess.h>
 #include <linux/cdev.h>
+#include <linux/version.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
+#include <linux/blk-mq.h>
+#endif
 
 #include "shannon_device.h"
 #include "shannon_memblock.h"
+
+int debug_cdev_open(struct inode *inode, struct file *file);
+int debug_cdev_release(struct inode *inode, struct file *file);
+ssize_t debug_cdev_read(struct file *file, char __user *buf, size_t count, loff_t *f_pos);
+ssize_t debug_cdev_write(struct file *file, const char __user *buf, size_t count, loff_t *f_pos);
+loff_t debug_cdev_llseek(struct file *filp, loff_t off, int whence);
 
 int debug_cdev_open(struct inode *inode, struct file *file)
 {

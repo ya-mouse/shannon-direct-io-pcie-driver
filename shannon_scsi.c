@@ -227,7 +227,11 @@ void end_scsi_cmnd(struct shannon_bio *sbio, enum shannon_scsi_cmd_status scsi_s
 	}
 	scsi_cmnd->result = scsi_status;
 	scsi_cmnd->host_scribble = NULL;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
+	scsi_done(scsi_cmnd);
+#else
 	scsi_cmnd->scsi_done(scsi_cmnd);
+#endif
 }
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 24)
@@ -358,7 +362,12 @@ int shannon_convert_scsi_scmd(struct shannon_bio *sbio, int logicb_size)
 }
 
 extern int shannon_receive_scsi_cmd(struct shannon_bio *sbio, unsigned char *sense_buffer);
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
+static int shannon_scsi_queuecommand_lck(struct scsi_cmnd *scsi_cmnd)
+#else
 static int shannon_scsi_queuecommand_lck(struct scsi_cmnd *scsi_cmnd, void (*done_fn)(struct scsi_cmnd *))
+#endif
 {
 	struct Scsi_Host *shost = scsi_cmnd->device->host;
 	struct scsi_device *sdevice = scsi_cmnd->device;
@@ -370,7 +379,9 @@ static int shannon_scsi_queuecommand_lck(struct scsi_cmnd *scsi_cmnd, void (*don
 
 	debugs1("host=%d, channel=%d, target=%d, lun=%d, cmd=0x%x.\n",
 			shost->this_id, starget->channel, starget->id, sdevice->lun, *scsi_cmnd->cmnd);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 8, 0)
 	scsi_cmnd->scsi_done = done_fn;
+#endif
 	sbio = alloc_sbio(GFP_NOWAIT);
 	sbio->hostdata = (struct shannon_scsi_private *)shost->hostdata;
 	sbio->scsi_cmnd = scsi_cmnd;

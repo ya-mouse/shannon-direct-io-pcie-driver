@@ -3,7 +3,6 @@
 #include <linux/cdev.h>
 #include <linux/interrupt.h>
 #include <linux/blkdev.h>
-#include <linux/genhd.h>
 #include <linux/kernel.h>
 #include <linux/jiffies.h>
 #include <linux/module.h>
@@ -11,12 +10,25 @@
 #ifdef CONFIG_SUSE_PRODUCT_CODE
 #include <linux/suse_version.h>
 #endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
+#include <linux/part_stat.h>
+#else
+#include <linux/genhd.h>
+#endif
 
 #include "shannon_device.h"
 #include "shannon_dma.h"
 #include "shannon_block.h"
 #include "shannon_time.h"
 #include "shannon_port.h"
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+// from block/blk.h
+extern void update_io_ticks(struct block_device *part, unsigned long now, bool end);
+extern unsigned long bio_start_io_acct(struct bio *bio);
+extern void bdev_end_io_acct(struct block_device *bdev, enum req_op op,
+							 unsigned int sectors, unsigned long start_time);
+#endif
 
 #define NAMEBUF_LEN 256
 
@@ -97,7 +109,11 @@ void shannon_device_destroy(shannon_class_t *cls, shannon_dev_t devt)
 
 shannon_class_t *shannon_class_create(shannon_module_t *owner, char *name)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
+	return class_create(name);
+#else
 	return class_create((struct module *)owner, name);
+#endif
 }
 
 void shannon_class_destroy(shannon_class_t *cls)
@@ -145,6 +161,40 @@ int shannon_disk_in_flight(shannon_gendisk_t *gdt)
 {
 	struct gendisk *gd = (struct gendisk *)gdt;
 	return atomic_read((atomic_t *)(&gd->part0.in_flight));
+}
+
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
+
+static inline void shannon_part_inc_in_flight(struct block_device *part, int rw)
+{
+	part_stat_local_inc(part, in_flight[rw]);
+
+	if (part->bd_partno)
+		part_stat_local_inc(part->bd_disk->part0, in_flight[rw]);
+}
+
+static inline void shannon_part_dec_in_flight(struct block_device *part, int rw)
+{
+	part_stat_local_dec(part, in_flight[rw]);
+	if (part->bd_partno)
+		part_stat_local_dec(part->bd_disk->part0, in_flight[rw]);
+}
+
+int shannon_disk_in_flight(shannon_gendisk_t *gdt)
+{
+	struct gendisk *gd = (struct gendisk *)gdt;
+	int cpu;
+	unsigned int inflight;
+
+	inflight = 0;
+	for_each_possible_cpu(cpu) {
+		inflight += part_stat_local_read_cpu(gd->part0, in_flight[0], cpu) + \
+			part_stat_local_read_cpu(gd->part0, in_flight[1], cpu);
+	}
+	if ((int)inflight < 0)
+		inflight = 0;
+
+	return inflight;
 }
 
 #else
@@ -217,8 +267,13 @@ int shannon_disk_in_flight(shannon_gendisk_t *gdt)
 	(defined(SHANNON_RHEL_RELEASE_OVER_8_0))
 	inflight = 0;
 	for_each_possible_cpu(cpu) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
+		inflight += part_stat_local_read_cpu(gd->part0, in_flight[0], cpu) + \
+			part_stat_local_read_cpu(gd->part0, in_flight[1], cpu);
+#else
 		inflight += part_stat_local_read_cpu(&gd->part0, in_flight[0], cpu) + \
 			part_stat_local_read_cpu(&gd->part0, in_flight[1], cpu);
+#endif
 	}
 	if ((int)inflight < 0)
 		inflight = 0;
@@ -232,7 +287,9 @@ int shannon_disk_in_flight(shannon_gendisk_t *gdt)
 
 #endif
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0) ||	\
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
+// nothing :)
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0) ||	\
 	(defined(SHANNON_RHEL_RELEASE_OVER_8_0))
 void shannon_update_io_ticks(struct hd_struct *part, unsigned long now)
 {
@@ -250,6 +307,23 @@ again:
         }
 }
 #endif
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+void shannon_start_io_acct(shannon_gendisk_t *gdt, shannon_bio_t *p)
+{
+	struct bio *bio = (struct bio *)p;
+	bio_start_io_acct(bio);
+}
+
+void shannon_end_io_acct(shannon_gendisk_t *gdt, shannon_bio_t *p, unsigned long duration)
+{
+	struct bio *bio = (struct bio *)p;
+	unsigned long now = READ_ONCE(jiffies);
+	unsigned long start_time = now - duration;
+	bdev_end_io_acct(bio->bi_bdev, bio_op(bio), bio_sectors(bio), start_time);
+}
+
+#else
 
 void shannon_start_io_acct(shannon_gendisk_t *gdt, shannon_bio_t *p)
 {
@@ -379,6 +453,30 @@ void shannon_end_io_acct(shannon_gendisk_t *gdt, shannon_bio_t *p, unsigned long
 	preempt_enable();
 #endif
 }
+#endif
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+static void part_stat_read_all(struct block_device *part,
+		struct disk_stats *stat)
+{
+	int cpu;
+
+	memset(stat, 0, sizeof(struct disk_stats));
+	for_each_possible_cpu(cpu) {
+		struct disk_stats *ptr = per_cpu_ptr(part->bd_stats, cpu);
+		int group;
+
+		for (group = 0; group < NR_STAT_GROUPS; group++) {
+			stat->nsecs[group] += ptr->nsecs[group];
+			stat->sectors[group] += ptr->sectors[group];
+			stat->ios[group] += ptr->ios[group];
+			stat->merges[group] += ptr->merges[group];
+		}
+
+		stat->io_ticks += ptr->io_ticks;
+	}
+}
+#endif
 
 unsigned long shannon_read_sectors(shannon_gendisk_t *gdt)
 {
@@ -387,7 +485,11 @@ unsigned long shannon_read_sectors(shannon_gendisk_t *gdt)
 	if (gd == NULL)
 		return 0;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 28)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+	struct disk_stats stat;
+	part_stat_read_all(gd->part0, &stat);
+	return stat.sectors[STAT_READ];
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 28)
 	return part_stat_read(&gd->part0, sectors[READ]);
 #else
 	return disk_stat_read(gd, sectors[READ]);
@@ -401,7 +503,11 @@ unsigned long shannon_write_sectors(shannon_gendisk_t *gdt)
 	if (gd == NULL)
 		return 0;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 28)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+	struct disk_stats stat;
+	part_stat_read_all(gd->part0, &stat);
+	return stat.sectors[STAT_WRITE];
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 28)
 	return part_stat_read(&gd->part0, sectors[WRITE]);
 #else
 	return disk_stat_read(gd, sectors[WRITE]);
@@ -415,7 +521,11 @@ unsigned long shannon_read_ios(shannon_gendisk_t *gdt)
 	if (gd == NULL)
 		return 0;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 28)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+	struct disk_stats stat;
+	part_stat_read_all(gd->part0, &stat);
+	return stat.ios[STAT_READ];
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 28)
 	return part_stat_read(&gd->part0, ios[READ]);
 #else
 	return disk_stat_read(gd, ios[READ]);
@@ -429,7 +539,11 @@ unsigned long shannon_write_ios(shannon_gendisk_t *gdt)
 	if (gd == NULL)
 		return 0;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 28)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+	struct disk_stats stat;
+	part_stat_read_all(gd->part0, &stat);
+	return stat.ios[STAT_WRITE];
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 28)
 	return part_stat_read(&gd->part0, ios[WRITE]);
 #else
 	return disk_stat_read(gd, ios[WRITE]);
@@ -443,7 +557,11 @@ unsigned long shannon_read_msecs(shannon_gendisk_t *gdt)
 	if (gd == NULL)
 		return 0;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 28)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+	struct disk_stats stat;
+	part_stat_read_all(gd->part0, &stat);
+	return stat.nsecs[STAT_READ] / 1000000;
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 28)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 19, 0) ||	\
 	(defined(SHANNON_RHEL_RELEASE_OVER_8_0))
 	return part_stat_read(&gd->part0, nsecs[READ])/1000000;
@@ -462,7 +580,11 @@ unsigned long shannon_write_msecs(shannon_gendisk_t *gdt)
 	if (gd == NULL)
 		return 0;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 28)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+	struct disk_stats stat;
+	part_stat_read_all(gd->part0, &stat);
+	return stat.nsecs[STAT_WRITE] / 1000000;
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 28)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 19, 0) ||	\
 	(defined(SHANNON_RHEL_RELEASE_OVER_8_0))
 	return part_stat_read(&gd->part0, nsecs[WRITE])/1000000;

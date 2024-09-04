@@ -17,6 +17,8 @@
 #include <linux/ioctl.h>
 #include <linux/highmem.h>
 #include <linux/topology.h>
+#include <linux/pci.h>
+#include <linux/pm_qos.h>
 #include "shannon_list.h"
 
 #define RESERVE_MEM(bytes) char mem[bytes] __attribute__ ((aligned(8)))
@@ -106,7 +108,11 @@ extern void shannon_write_unlock_irq(shannon_rwlock_t *lock);
 extern int shannon_write_trylock(shannon_rwlock_t *lock);
 
 #endif
+extern unsigned long shannon_read_lock_irqsave(shannon_rwlock_t *lock);
+extern unsigned long shannon_write_lock_irqsave(shannon_rwlock_t *lock);
 extern unsigned long shannon_spin_lock_irqsave(shannon_spinlock_t *lock);
+extern void shannon_read_unlock_irqrestore(shannon_rwlock_t *lock, unsigned long flags);
+extern void shannon_write_unlock_irqrestore(shannon_rwlock_t *lock, unsigned long flags);
 extern void shannon_spin_unlock_irqrestore(shannon_spinlock_t *lock, unsigned long flags);
 //  @END of spinlock wrapper
 
@@ -133,6 +139,7 @@ typedef struct __shannon_semaphore shannon_mutex_t;
 #else
 
 extern void shannon_mutex_init(shannon_mutex_t *lock);
+extern void shannon_mutex_init2(shannon_mutex_t *lock);
 extern void shannon_mutex_lock(shannon_mutex_t *lock);
 extern void shannon_mutex_unlock(shannon_mutex_t *lock);
 extern int shannon_mutex_trylock(shannon_mutex_t *lock);

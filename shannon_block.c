@@ -2,7 +2,6 @@
 #include <linux/device.h>
 #include <linux/interrupt.h>
 #include <linux/blkdev.h>
-#include <linux/genhd.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/version.h>
@@ -16,6 +15,11 @@
 	(defined(SHANNON_RHEL_RELEASE_OVER_8_0)) ||	\
 	(defined(SHANNON_SUSE_RELEASE_OVER_1_12_5))
 #include <linux/blk-mq.h>
+#endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
+struct request_queue *blk_alloc_queue(int node_id);
+#else
+#include <linux/genhd.h>
 #endif
 
 #include "shannon_block.h"
@@ -44,10 +48,19 @@ const char *get_gendisk_name(shannon_gendisk_t *gd)
 	return ((struct gendisk *) gd)->disk_name;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+// static struct lock_class_key shannon_bio_compl_lkclass;
+#endif
+
 //  genhd.h
 shannon_gendisk_t *shannon_alloc_disk(int minors)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+	return blk_alloc_disk(NUMA_NO_NODE);
+//	return __blk_alloc_disk(NUMA_NO_NODE, &shannon_bio_compl_lkclass);
+#else
 	return alloc_disk(minors);
+#endif
 }
 
 extern struct block_device_operations shannon_ops;
@@ -89,7 +102,16 @@ void shannon_put_disk(shannon_gendisk_t *disk)
 
 void shannon_add_disk(shannon_gendisk_t *disk)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+	struct gendisk *gd = (struct gendisk *)disk;
+	int err = add_disk(gd);
+	if (err) {
+		dev_err(disk_to_dev(gd), "Cannot add disk\n");
+		put_disk(gd);
+	}
+#else
 	add_disk((struct gendisk *)disk);
+#endif
 }
 
 void shannon_del_gendisk(shannon_gendisk_t *gp)
@@ -195,6 +217,15 @@ void shannon_queue_flag_clear(int flag, shannon_request_queue_t *queue)
 #endif
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
+void shannon_trim_setting(shannon_request_queue_t *queue)
+{
+	struct request_queue *rq = (struct request_queue *)queue;
+	rq->limits.discard_granularity = PAGE_SIZE;
+	blk_queue_max_discard_sectors(rq, (UINT_MAX >> 9) & ~7);
+	blk_queue_max_write_zeroes_sectors(rq, (UINT_MAX >> 9) & ~7);
+}
+#else
 void shannon_trim_setting(shannon_request_queue_t *queue)
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 32)
@@ -224,6 +255,7 @@ void shannon_trim_setting(shannon_request_queue_t *queue)
 #endif
 #endif
 }
+#endif
 
 void shannon_rotational_setting(shannon_request_queue_t *queue)
 {
@@ -250,7 +282,11 @@ void shannon_blk_cleanup_queue(shannon_request_queue_t *q)
 		shannon_kfree(data);
 	}
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+	blk_put_queue(queue);
+#else
 	blk_cleanup_queue(queue);
+#endif
 }
 #else
 void shannon_blk_cleanup_queue(shannon_request_queue_t *q)
@@ -991,7 +1027,9 @@ free_sbio:
 }
 
 //  make_request
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
+// nothing :)
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0)
 static blk_qc_t shannon_make_request_wrapper(struct request_queue *q, struct bio *bio)
 {
 	shannon_make_request(q, bio);
@@ -1621,6 +1659,12 @@ static shannon_request_queue_t *shannon_init_queue(void *data, shannon_spinlock_
 }
 #endif // LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
+shannon_request_queue_t *shannon_create_blkqueue(void *data, shannon_spinlock_t *lock, int ns)
+{
+	return shannon_init_queue(data, lock);
+}
+#else
 static shannon_request_queue_t *shannon_alloc_queue(void *data, int ns)
 {
 	struct request_queue *queue = NULL;
@@ -1644,3 +1688,4 @@ shannon_request_queue_t *shannon_create_blkqueue(void *data, shannon_spinlock_t 
 	else
 		return shannon_alloc_queue(data, ns);
 }
+#endif

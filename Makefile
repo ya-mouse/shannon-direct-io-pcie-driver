@@ -21,8 +21,17 @@ endif
 # Uncomment this to build EMU module directly in this dir.
 #SHANNON_FLAGS += -DCONFIG_SHANNON_EMU_MODULE
 
-.PHONY: all clean modules_clean modules modules_install uninstall
-all: modules
+.PHONY: all shipped clean modules_clean modules modules_install uninstall
+all: shipped modules
+
+SHIPPED_OBJS := $(wildcard *.o_shipped)
+TARGET_OBJS := $(SHIPPED_OBJS:.o_shipped=.o)
+
+shipped: $(TARGET_OBJS)
+
+%.o: %.o_shipped
+	objcopy --redefine-sym printk=_printk $< $@
+	truncate -s 0 .$@.cmd
 
 clean modules_clean:
 	$(MAKE) \
