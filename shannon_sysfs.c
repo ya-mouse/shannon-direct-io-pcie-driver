@@ -577,8 +577,14 @@ void shannon_sysfs_exit(shannon_kobject_t *skobj)
 struct kobject *to_sdev_kobj(shannon_kobject_t *skobj)
 {
 	struct gendisk *disk = (struct gendisk *)to_shannon_disk(skobj);
+	debugs0("disk=0x%08x.\n", disk);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 28)
+	debugs0("dev=0x%08x.\n", disk_to_dev(disk));
+	if (disk_to_dev(disk))
+	{
+		debugs0("kobj=0x%08x.\n", disk_to_dev(disk)->kobj);
+	}
 	return &disk_to_dev(disk)->kobj;
 #else
 	return &disk->dev.kobj;
@@ -591,7 +597,9 @@ struct kobject *to_sdev_kobj(shannon_kobject_t *skobj)
 
 int shannon_sysfs_link(shannon_kobject_t *skobj)
 {
+	debugs0("skobj=0x%08x.\n", skobj);
 	struct kobject *sdev_kobj = to_sdev_kobj(skobj);
+	debugs0("sdev_kobj=0x%08x skobj=0x%08x.\n", sdev_kobj, skobj);
 	return sysfs_create_link(sdev_kobj, (struct kobject *)skobj, "shannon");
 }
 

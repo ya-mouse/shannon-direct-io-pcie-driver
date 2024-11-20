@@ -3,12 +3,6 @@
 
 #include "shannon_kcore.h"
 
-struct __shannon_kobject {
-	RESERVE_MEM(152);
-};
-
-typedef struct __shannon_kobject shannon_kobject_t;
-
 extern int shannon_sysfs_init(shannon_kobject_t *skobj);
 extern void shannon_sysfs_exit(shannon_kobject_t *skobj);
 extern int shannon_sysfs_link(shannon_kobject_t *skobj);

@@ -107,12 +107,12 @@ static inline void set_sbio_debug_tag(struct shannon_bio *sbio, unsigned long ta
 #endif
 
 //  genhd.h
-extern shannon_gendisk_t *shannon_alloc_disk(int minors);
+extern shannon_gendisk_t *shannon_alloc_disk(shannon_request_queue_t *rq, int minors);
 extern int shannon_init_gendisk(shannon_gendisk_t *disk, char *name, int major, int minor_span, int first_minor, shannon_request_queue_t *rq, void *pri);
 extern void shannon_set_capacity(shannon_gendisk_t *disk, shannon_sector_t size);
 extern void shannon_set_disk_ro(shannon_gendisk_t *disk, int flag);
 extern void shannon_put_disk(shannon_gendisk_t *disk);
-extern void shannon_add_disk(shannon_gendisk_t *disk);
+extern int shannon_add_disk(shannon_gendisk_t *disk);
 extern const char *get_gendisk_name(shannon_gendisk_t *gd);
 extern void shannon_del_gendisk(shannon_gendisk_t *gp);
 
@@ -123,8 +123,9 @@ extern void shannon_unregister_blkdev(unsigned int major, const char *name);
 struct shannon_namespace;
 
 //  blkdev.h
-struct shannon_dev;
 struct shannon_disk;
+extern int shannon_detach(struct shannon_dev *sdev);
+extern int shannon_attach_sdev(struct shannon_dev *sdev);
 extern shannon_request_queue_t *shannon_create_blkqueue(void *, shannon_spinlock_t *lock, int);
 extern void shannon_blk_queue_block_size(shannon_request_queue_t *queue, unsigned int, unsigned int);
 extern void shannon_blk_queue_max_hw_sectors(shannon_request_queue_t *, unsigned int);

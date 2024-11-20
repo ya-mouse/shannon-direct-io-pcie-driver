@@ -40,19 +40,101 @@ struct shannon_blk_mq_data {
 };
 #endif
 
+int shannon_attach_sdev(struct shannon_dev *sdev) {
+    // Check if disk is already attached
+	debugs0("sdev=0x%08x name=%s.\n", sdev, sdev->name);
+    if (sdev->disk != NULL) {  // checking offset 0xc728
+        shannon_printk(KERN_ERR, "%s: disk already attached\n", sdev->name);
+        return -1;
+    }
+
+    // Allocate new disk
+    struct shannon_request_queue *queue = sdev->queue;  // offset 0xc720
+	debugs0(">>> queue=0x%08x.\n", queue);
+    struct gendisk *disk = shannon_alloc_disk(queue, 64);  // 0x40
+    if (disk == NULL) {
+        shannon_printk(KERN_ERR, "%s: alloc disk failed\n", sdev->name);
+        return -1;
+    }
+    sdev->disk = disk;
+
+    // Initialize disk parameters
+    int major = sdev->major;          // offset 0x31bc
+    int minor = sdev->minor;          // offset 0x31b8
+    char *name = sdev->dev_name;      // offset 0xd3e0
+    
+    // Initialize the disk structure
+    shannon_init_gendisk(disk, name, major, 64, minor << 6, queue, sdev);
+    
+    // Set disk capacity
+    shannon_set_capacity(disk, sdev->capacity);  // offset 0xd3f0
+    
+    // Update some internal limits
+    if (sdev->limit1 > sdev->limit2) {  // offsets 0x3630, 0x3640
+        sdev->limit2 = sdev->limit1;
+    }
+    
+    // Add disk to system
+    if (shannon_add_disk(disk)) {
+        shannon_printk(KERN_ERR, "%s: add_disk failed\n", sdev->name);
+        shannon_detach(sdev);
+        return -1;
+	} 
+
+    // Create sysfs links
+	debugs0("sysfs=0x%08x name=%s.\n", &sdev->kobj, sdev->name);
+    int ret = shannon_sysfs_link(&sdev->kobj);  // offset 0xe2d0
+    if (ret != 0) {
+        shannon_printk(KERN_ERR, "%s: sysfs link failed\n", sdev->name);
+        shannon_detach(sdev);
+        return -1;
+    }
+
+	debugs1("Attached disk %s\n", name);
+
+    // Initialize some device parameters
+    sdev->state = 2;           // offset 0xe400
+    sdev->counter1 = 0;        // offset 0xb2c
+    sdev->counter2 = (sdev->param1 * sdev->param2) * 3;  // offsets 0x2e94, 0xda98, 0xb30
+
+    // Print device information
+    shannon_printk_ratelimited(KERN_INFO, "%s: Device %s initialized\n", sdev->name, name);
+
+    // Calculate and print some performance metrics
+    int value = sdev->perf_metric;    // offset 0x2e70
+    int quotient = value / 100;
+    int remainder = value % 100;
+    
+    uint64_t bytes = sdev->capacity << 9;
+    uint64_t gigabytes = bytes / 1000000000;
+    
+    int param3 = sdev->param3;        // offset 0xda68
+    int param4 = sdev->param4;        // offset 0xda74
+    
+    shannon_printk_ratelimited(KERN_INFO, 
+        "Device metrics: %llu GB, %d.%d performance, params: %d, %d\n",
+        gigabytes, quotient, remainder, param3, param4);
+
+    return 0;
+}
+
 // Helpers
 const char *get_gendisk_name(shannon_gendisk_t *gd)
 {
 	return ((struct gendisk *) gd)->disk_name;
 }
 
-//  genhd.h
-shannon_gendisk_t *shannon_alloc_disk(int minors)
-{
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
-	// __blk_alloc_disk
-	struct gendisk *disk = blk_alloc_disk(NUMA_NO_NODE);
-	debugs0("disk=%p err=%d minors=%d q=%p td=%p.\n", disk, IS_ERR(disk), minors, disk->queue, disk->queue->td);
+static struct lock_class_key shannon_bio_compl_lkclass;
+#endif
+
+//  genhd.h
+shannon_gendisk_t *shannon_alloc_disk(shannon_request_queue_t *rq, int minors)
+{
+	struct gendisk *disk;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+	disk = blk_mq_alloc_disk_for_queue((struct request_queue *)rq, &shannon_bio_compl_lkclass);
+	debugs0("disk=0x%08x err=%d minors=%d q=0x%08x td=0x%08x.\n", disk, IS_ERR(disk), minors, disk->queue, disk->queue->td);
 	if (IS_ERR(disk))
 	{
 		SHN_BUG_ON(IS_ERR(disk));
@@ -66,7 +148,11 @@ shannon_gendisk_t *shannon_alloc_disk(int minors)
 	// }
 	return disk;
 #else
-	return alloc_disk(minors);
+	disk = alloc_disk(minors);
+	if (!disk)
+		return NULL;
+	disk->queue = (struct request_queue *)rq;
+	reqturn disk;
 #endif
 }
 
@@ -82,7 +168,6 @@ int shannon_init_gendisk(shannon_gendisk_t *disk, char *name, int major, int min
 	gd->first_minor = first_minor;
 	debugs0("disk_name=%s, major=%d, minors=%d, first_minor=%d rtd=%p dtd=%p.\n",
 			gd->disk_name, gd->major, gd->minors, gd->first_minor, ((struct request_queue *)rq)->td, gd->queue->td);
-	gd->queue = (struct request_queue *)rq;
 	gd->private_data = pri;
 	gd->fops = &shannon_ops;
 	/* dfX is a conventional disk; pXvolX is namespace. */
@@ -94,7 +179,7 @@ int shannon_init_gendisk(shannon_gendisk_t *disk, char *name, int major, int min
 
 void shannon_set_capacity(shannon_gendisk_t *disk, shannon_sector_t size)
 {
-	debugs0("disk=%p size=%llu\n", disk, size);
+	debugs0("disk=0x%08x size=%llu\n", disk, size);
 	set_capacity((struct gendisk *)disk, size);
 }
 
@@ -108,18 +193,22 @@ void shannon_put_disk(shannon_gendisk_t *disk)
 	put_disk((struct gendisk *)disk);
 }
 
-void shannon_add_disk(shannon_gendisk_t *disk)
+int shannon_add_disk(shannon_gendisk_t *disk)
 {
-	debugs0("disk=%p\n", disk);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
 	struct gendisk *gd = (struct gendisk *)disk;
+	debugs0("disk=0x%08x queue_is_mq=%d poll_bio=0x%x\n", gd, queue_is_mq(gd->queue), gd->fops->poll_bio);
 	int err = add_disk(gd);
 	if (err) {
-		dev_err(disk_to_dev(gd), "Cannot add disk\n");
+		debugs0("disk_name=%s\n", gd->disk_name);
+		dev_err(disk_to_dev(gd), "Cannot add disk: %d\n", err);
 		put_disk(gd);
+		return err;
 	}
+	return 0;
 #else
 	add_disk((struct gendisk *)disk);
+	return 0;
 #endif
 }
 
@@ -143,7 +232,7 @@ void shannon_unregister_blkdev(unsigned int major, const char *name)
 void shannon_blk_queue_block_size(shannon_request_queue_t *queue, unsigned int logical_size, unsigned int physical_size)
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 31)
-	debugs0("queue=%p logical_size=%d physical_size=%d\n", queue, logical_size, physical_size);
+	debugs0("queue=0x%08x logical_size=%d physical_size=%d\n", queue, logical_size, physical_size);
 	blk_queue_logical_block_size((struct request_queue *)queue, logical_size);
 	blk_queue_physical_block_size((struct request_queue *)queue, physical_size);
 
@@ -156,7 +245,7 @@ void shannon_blk_queue_block_size(shannon_request_queue_t *queue, unsigned int l
 
 void shannon_blk_queue_max_hw_sectors(shannon_request_queue_t *q, unsigned int max_hw_sectors)
 {
-	debugs0("q=%p max_hw_sectors=%d\n", q, max_hw_sectors);
+	debugs0("q=0x%08x max_hw_sectors=%d\n", q, max_hw_sectors);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 31)
 	blk_queue_max_hw_sectors((struct request_queue *)q, max_hw_sectors);
 #else
@@ -204,7 +293,7 @@ static int shannon_should_trim_bio(shannon_bio_t *bio)
 
 void shannon_queue_flag_set(int flag, shannon_request_queue_t *queue)
 {
-	debugs0("queue=%p flag=%d\n", queue, flag);
+	debugs0("queue=0x%08x flag=%d\n", queue, flag);
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 26)
 	set_bit(flag, &(((struct request_queue *)queue)->queue_flags));
 #elif LINUX_VERSION_CODE < KERNEL_VERSION(4, 17, 0) &&	\
@@ -270,7 +359,7 @@ void shannon_trim_setting(shannon_request_queue_t *queue)
 
 void shannon_rotational_setting(shannon_request_queue_t *queue)
 {
-	debugs0("queue=%p\n", queue);
+	debugs0("queue=0x%08x\n", queue);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 28)
 	shannon_queue_flag_set(QUEUE_FLAG_NONROT, queue);
 #endif
@@ -289,7 +378,7 @@ void shannon_blk_cleanup_queue(shannon_request_queue_t *q, int ns)
 	struct request_queue *queue = (struct request_queue *) q;
 	struct shannon_blk_mq_data *data = NULL;
 
-	debugs0("queue=%p ns=%d\n", queue, ns);
+	debugs0("queue=0x%08x ns=%d\n", queue, ns);
 	if (shannon_use_iosched && !ns) {
 		data = (struct shannon_blk_mq_data*) queue->queuedata;
 		shannon_blk_mq_free_tag_set(&data->tag_set);
@@ -1645,6 +1734,7 @@ static shannon_request_queue_t *shannon_init_queue(void *data, shannon_spinlock_
 		queue->queuedata = blk_mq_data;
 	}
 
+	debugs0("<<< queue=0x%08x.\n", queue);
 	return queue;
 
 free_tag_set:
