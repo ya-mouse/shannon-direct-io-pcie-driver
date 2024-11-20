@@ -31,12 +31,13 @@ extern int shannon_timer_pending(shannon_timer_list * timer);
 //  delay.h
 extern void shannon_msleep(unsigned int msecs);
 extern void shannon_udelay(unsigned long usecs);
-
 extern unsigned long get_jiffies(void);
 extern void shannon_do_gettimeofday(struct shannon_timeval *tv);
 extern void shannon_getnstimeofday(struct shannon_timeval *tv);
 
 //  jiffies.h
+extern int shannon_time_after_eq(const unsigned long now, const unsigned long timeout);
+extern int shannon_time_before(const unsigned long now, const unsigned long timeout);
 extern unsigned int shannon_jiffies_to_msecs(const unsigned long j);
 extern unsigned int shannon_jiffies_to_usecs(const unsigned long j);
 extern unsigned long shannon_msecs_to_jiffies(const unsigned int m);

@@ -163,7 +163,8 @@ int shannon_fill_from_dev_buffer(void *scsi_cmnd, unsigned char *arr, int arr_le
 	return 0;
 }
 
-#elif LINUX_VERSION_CODE < KERNEL_VERSION(5, 1, 0)
+#elif LINUX_VERSION_CODE < KERNEL_VERSION(5, 1, 0) &&	\
+	(!defined(SHANNON_RHEL_RELEASE_OVER_8_3))
 /* Returns 0 if ok else (DID_ERROR << 16). Sets scp->resid . */
 int shannon_fill_from_dev_buffer(void *scsi_cmnd, unsigned char *arr, int arr_len)
 {
@@ -274,7 +275,7 @@ int shannon_convert_scsi_scmd(struct shannon_bio *sbio, int logicb_size)
 	sbio->segments = sdb->table.nents;
 #else
 	sbio->segments = scsi_cmnd->use_sg;
-	BUG_ON(0 == scsi_cmnd->use_sg);
+	SHN_BUG_ON(0 == scsi_cmnd->use_sg);
 #endif
 	sbio->sg_count = 2 * ((sbio->bio_size + logicb_size - 1)/logicb_size) + sbio->segments;
 	sbio->sg = shannon_sg_alloc(sbio->sg_count, GFP_ATOMIC);
@@ -348,7 +349,7 @@ int shannon_convert_scsi_scmd(struct shannon_bio *sbio, int logicb_size)
 			sbio->used_sg_count++;
 			offset += map_size;
 		}
-		BUG_ON(offset < sge->length);
+		SHN_BUG_ON(offset < sge->length);
 	}
 #if 0
 	sg = sbio->sg;

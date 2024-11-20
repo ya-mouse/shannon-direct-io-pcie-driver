@@ -111,6 +111,17 @@ void shannon_do_gettimeofday(struct shannon_timeval *tv)
 }
 
 // jiffies.h
+
+int shannon_time_after_eq(const unsigned long now, const unsigned long timeout)
+{
+	return time_after_eq(now, timeout);
+}
+
+int shannon_time_before(const unsigned long now, const unsigned long timeout)
+{
+	return time_before(now, timeout);
+}
+
 unsigned int shannon_jiffies_to_msecs(const unsigned long j)
 {
 	return jiffies_to_msecs(j);

@@ -180,6 +180,10 @@ extern shannon_ssize_t in_write_chunk_factor_show(struct shannon_dev *sdev, char
 extern shannon_ssize_t in_write_chunk_factor_store(struct shannon_dev *sdev, const char *buf, shannon_size_t count);
 extern shannon_ssize_t buffer_write_policy_show(struct shannon_dev *sdev, char *buf);
 extern shannon_ssize_t buffer_write_policy_store(struct shannon_dev *sdev, const char *buf, shannon_size_t count);
+extern shannon_ssize_t data_retention_interval_show(struct shannon_dev *sdev, char *buf);
+extern shannon_ssize_t data_retention_interval_store(struct shannon_dev *sdev, const char *buf, shannon_size_t count);
+extern shannon_ssize_t lun_retiring_threshold_show(struct shannon_dev *sdev, char *buf);
+extern shannon_ssize_t lun_retiring_threshold_store(struct shannon_dev *sdev, const char *buf, shannon_size_t count);
 
 extern shannon_ssize_t update_irq_delay_interval_show(struct shannon_dev *sdev, char *buf);
 extern shannon_ssize_t update_irq_delay_interval_store(struct shannon_dev *sdev, const char *buf, shannon_size_t count);

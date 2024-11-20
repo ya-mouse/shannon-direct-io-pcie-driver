@@ -71,22 +71,31 @@
 })
 #define smb_exclusively_unlock(lpmt, list_index)	(smb_lock_by_cnt((lpmt), (list_index), 0xffff))
 
-#define MAPTABLE_MEMBLOCK_SIZE	(4096)
-#define TEMPTABLE_MEMBLOCK_SIZE	(1024)
-#define MAP_TABLE_ENTRY_SIZE	(sizeof(u32) + sizeof(u8))
-#define MAPTABLE_TYPE	(0)
-#define TEMPTABLE_TYPE	(1)
-#define ENTRIES_PER_MEMBLOCK_SHIFT	(10)
+/*
+ * Must ensure that MAPTABLE_MEMBLOCK_SIZE >= logicb_size, and
+ * TEMPTABLE_MEMBLOCK_SIZE <= logicb_size.
+ * Otherwise fastboot won't be enabled.
+ */
+typedef u32 lpmt_maptable_t;
+typedef u8 lpmt_temptable_t;
+#define LOGICB_SIZE_SHIFT			(12)
+#define MAPTABLE_TYPE_SIZE_SHIFT	(2)
+#define TEMPTABLE_TYPE_SIZE_SHIFT	(0)
+#define ENTRIES_PER_MEMBLOCK_SHIFT	(20)
 #define ENTRIES_PER_MEMBLOCK		(1 << ENTRIES_PER_MEMBLOCK_SHIFT)
-
-#define MAPTABLE_MEMBLOCK_SIZE	(4096)
-#define TEMPTABLE_MEMBLOCK_SIZE	(1024)
-#define MAPTABLE_TYPE	(0)
-#define TEMPTABLE_TYPE	(1)
+#define MAP_TABLE_ENTRY_SIZE		(sizeof(lpmt_maptable_t) + sizeof(lpmt_temptable_t))
+#define MAPTABLE_MEMBLOCK_SIZE_SHIFT	(MAPTABLE_TYPE_SIZE_SHIFT + ENTRIES_PER_MEMBLOCK_SHIFT)
+#define TEMPTABLE_MEMBLOCK_SIZE_SHIFT	(TEMPTABLE_TYPE_SIZE_SHIFT + ENTRIES_PER_MEMBLOCK_SHIFT)
+#define MAPTABLE_MEMBLOCK_SIZE		(1 << MAPTABLE_MEMBLOCK_SIZE_SHIFT)
+#define TEMPTABLE_MEMBLOCK_SIZE		(1 << TEMPTABLE_MEMBLOCK_SIZE_SHIFT)
+#define LOGICBS_PER_MAPTABLE_SHIFT	(MAPTABLE_MEMBLOCK_SIZE_SHIFT - LOGICB_SIZE_SHIFT)
+#define LOGICBS_PER_TEMPTABLE_SHIFT	(TEMPTABLE_MEMBLOCK_SIZE_SHIFT - LOGICB_SIZE_SHIFT)
+#define MAPTABLE_TYPE			(0)
+#define TEMPTABLE_TYPE			(1)
 
 struct maptable_memblock {
-	u32 maptable_slot[1024];
-	u8 temptable_slot[1024];
+	lpmt_maptable_t maptable_slot[ENTRIES_PER_MEMBLOCK];
+	lpmt_temptable_t temptable_slot[ENTRIES_PER_MEMBLOCK];
 };
 
 #define LPMT_INVALID	(~0x0u)
@@ -100,7 +109,7 @@ struct scatter_memblock {
 	u32 entries_per_memblock;
 	u32 entries_per_memblock_shift;
 #define MEMBLOCK_LOCK_CNT	(16)		// it must be order of 2
-	shannon_spinlock_t list_lock[MEMBLOCK_LOCK_CNT];
+	shannon_mutex_t memblock_alloc_lock[MEMBLOCK_LOCK_CNT];
 
 	shannon_atomic_t *memblock_lock;
 	shannon_atomic_t *user_count;

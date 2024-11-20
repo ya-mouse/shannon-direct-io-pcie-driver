@@ -568,8 +568,12 @@ int shannon_pci_get_node(shannon_pci_dev_t *pdev)
 
 void get_pci_bus_info(shannon_pci_dev_t *pdev, struct shannon_pci_info *info)
 {
-	struct pci_dev *dev = ((struct pci_dev *)pdev);
-	get_pci_info((shannon_pci_dev_t *)dev->bus->self, info);
+    struct pci_dev *dev = ((struct pci_dev *)pdev);
+    if (dev->bus && dev->bus->self) {
+        get_pci_info((shannon_pci_dev_t *)dev->bus->self, info);
+    } else {
+        memset(info, 0, sizeof(*info));
+    }
 }
 
 int shannon_pci_bus_retrain(shannon_pci_dev_t *pdev)

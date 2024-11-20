@@ -109,6 +109,19 @@ static int shannon_getgeo_ns(struct block_device *bdev, struct hd_geometry *geo)
  * https://github.com/torvalds/linux/commit/4a6f3d480edc3570a8059f3a0fb388641b6ec73f
  * https://github.com/torvalds/linux/commit/444aa2c58cb3b6cfe3b7cc7db6c294d73393a894
  */
+static void shannon_submit_bio(struct bio *bio)
+{
+    struct request_queue *q = bio->bi_bdev->bd_disk->queue;
+    shannon_make_request(q, bio);
+}
+
+// New submit_bio implementation for namespace that uses existing make_request logic
+static void shannon_submit_bio_ns(struct bio *bio)
+{
+    struct request_queue *q = bio->bi_bdev->bd_disk->queue;
+    shannon_make_request_ns(q, bio);
+}
+
 static int shannon_open(struct gendisk *disk, fmode_t mode)
 {
 	struct shannon_dev *dev = disk->private_data;
@@ -142,6 +155,7 @@ struct block_device_operations shannon_ops = {
 	.getgeo		= shannon_getgeo,
 	.open		= shannon_open,
 	.release	= shannon_release,
+	.submit_bio	= shannon_submit_bio,
 };
 
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 28)
@@ -238,6 +252,8 @@ struct block_device_operations shannon_ops_ns = {
 	.getgeo		= shannon_getgeo_ns,
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 8, 0)
 	.revalidate_disk = shannon_revalidate_ns,
+#else
+	.submit_bio	= shannon_submit_bio_ns,
 #endif
 	.open		= shannon_open_ns,
 	.release	= shannon_release_ns,
@@ -530,7 +546,7 @@ static struct pci_driver shannon_driver = {
 	.err_handler = &shannon_pci_error_handlers,
 #ifdef SHANNON_ON_RHEL
 #if (defined(SHANNON_RHEL_RELEASE_OVER_7_2)) &&   \
-	(defined(SHANNON_RHEL_RELEASE_BELOW_8_0))
+	(!defined(SHANNON_RHEL_RELEASE_BELOW_8_0))
 	.pci_driver_rh	= &shannon_pci_driver_rh,
 #endif
 #endif
@@ -613,6 +629,9 @@ module_param(shannon_max_wl_factor, int, S_IRUGO|S_IWUSR);
 
 extern int shannon_ns_maptable_autofree;
 module_param(shannon_ns_maptable_autofree, int, S_IRUGO | S_IWUSR);
+
+extern int shannon_lun_retiring_enable;
+module_param(shannon_lun_retiring_enable, int, S_IRUGO | S_IWUSR);
 
 extern int shannon_alloc_mempool(void);
 extern void shannon_free_mempool(void);
@@ -700,6 +719,6 @@ static void __exit shannon_exit(void)
 }
 
 MODULE_LICENSE("GPL");
-MODULE_VERSION("3.4.1");
+MODULE_VERSION("3.4.3.1");
 module_init(shannon_init);
 module_exit(shannon_exit);

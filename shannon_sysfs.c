@@ -265,6 +265,8 @@ define_one_rw(max_irq_delay);
 define_one_rw(discard_large_unit_threshold);
 define_one_rw(in_write_chunk_factor);
 define_one_rw(buffer_write_policy);
+define_one_rw(data_retention_interval);
+define_one_rw(lun_retiring_threshold);
 
 #ifdef CONFIG_HWMON
 define_one_device_ro(name);
@@ -426,6 +428,8 @@ static struct attribute *shannon_default_attrs[] = {
 	&prefetch_traffic_factor.attr,
 	&in_write_chunk_factor.attr,
 	&buffer_write_policy.attr,
+	&data_retention_interval.attr,
+	&lun_retiring_threshold.attr,
 	NULL,
 };
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)

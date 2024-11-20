@@ -62,7 +62,7 @@ ssize_t debug_cdev_read(struct file *file, char __user *buf, size_t count, loff_
 			data_len = (remain < (MAPTABLE_MEMBLOCK_SIZE - ((*f_pos) % MAPTABLE_MEMBLOCK_SIZE)) ? remain : (MAPTABLE_MEMBLOCK_SIZE - ((*f_pos) % MAPTABLE_MEMBLOCK_SIZE)));
 			if (((*f_pos) % MAPTABLE_MEMBLOCK_SIZE) + data_len > MAPTABLE_MEMBLOCK_SIZE)
 				shannon_err("f_pos + data_len > memblock_size, offset=%ld, f_pos%mb->memblock_size=%ld, data_len=%ld\n", *f_pos, (*f_pos) % MAPTABLE_MEMBLOCK_SIZE, data_len);
-			if (unlikely(check_and_alloc_memblock(smb, *f_pos))) {
+			if (unlikely(check_and_alloc_memblock(smb, (*f_pos) >> MAPTABLE_TYPE_SIZE_SHIFT))) {
 				ret = -EFAULT;
 				goto out;
 			}
@@ -81,7 +81,7 @@ ssize_t debug_cdev_read(struct file *file, char __user *buf, size_t count, loff_
 			data_len = (remain < (TEMPTABLE_MEMBLOCK_SIZE - ((*f_pos) % TEMPTABLE_MEMBLOCK_SIZE)) ? remain : (TEMPTABLE_MEMBLOCK_SIZE - ((*f_pos) % TEMPTABLE_MEMBLOCK_SIZE)));
 			if (((*f_pos) % TEMPTABLE_MEMBLOCK_SIZE) + data_len > TEMPTABLE_MEMBLOCK_SIZE)
 				shannon_err("f_pos + data_len > memblock_size, offset=%ld, f_pos%mb->memblock_size=%ld, data_len=%ld\n", *f_pos, (*f_pos) % TEMPTABLE_MEMBLOCK_SIZE, data_len);
-			if (unlikely(check_and_alloc_memblock(smb, *f_pos))) {
+			if (unlikely(check_and_alloc_memblock(smb, (*f_pos) >> MAPTABLE_TYPE_SIZE_SHIFT))) {
 				ret = -EFAULT;
 				goto out;
 			}

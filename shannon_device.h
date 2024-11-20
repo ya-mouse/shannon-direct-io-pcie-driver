@@ -60,10 +60,15 @@ extern int shannon_alloc_chrdev_region(dev_t *dev, unsigned baseminor, unsigned 
 extern void shannon_unregister_chrdev_region(dev_t from, unsigned count);
 
 // disk statistics
-extern void shannon_update_io_ticks(struct block_device *part, unsigned long now);
 extern int shannon_disk_in_flight(shannon_gendisk_t *gdt);
-extern void shannon_start_io_acct(shannon_gendisk_t *gdt, shannon_bio_t *bio);
-extern void shannon_end_io_acct(shannon_gendisk_t *gdt, shannon_bio_t *bio, unsigned long duration);
+extern unsigned long shannon_start_io_acct(shannon_gendisk_t *gdt,
+				  shannon_request_queue_t *queue,
+				  shannon_bio_t *p);
+extern void shannon_end_io_acct(shannon_gendisk_t *gdt,
+				shannon_request_queue_t *queue,
+				shannon_bio_t *p,
+				unsigned long start_time);
+extern void shannon_update_io_ticks(struct block_device *part, unsigned long now);
 extern unsigned long shannon_read_sectors(shannon_gendisk_t *gdt);
 extern unsigned long shannon_write_sectors(shannon_gendisk_t *gdt);
 extern unsigned long shannon_read_ios(shannon_gendisk_t *gdt);

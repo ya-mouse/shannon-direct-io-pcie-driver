@@ -130,7 +130,7 @@ extern void shannon_blk_queue_block_size(shannon_request_queue_t *queue, unsigne
 extern void shannon_blk_queue_max_hw_sectors(shannon_request_queue_t *, unsigned int);
 extern void shannon_blk_queue_io_min(shannon_request_queue_t *queue, unsigned int min);
 extern void shannon_blk_queue_io_opt(shannon_request_queue_t *queue, unsigned int opt);
-extern void shannon_blk_cleanup_queue(shannon_request_queue_t *q);
+extern void shannon_blk_cleanup_queue(shannon_request_queue_t *q, int ns);
 extern void shannon_trim_setting(shannon_request_queue_t *queue);
 extern void shannon_rotational_setting(shannon_request_queue_t *queue);
 extern void shannon_queue_flag_set(int flag, shannon_request_queue_t *queue);
@@ -147,13 +147,15 @@ extern void submit_sbio_task_ns(struct shannon_work_struct *work);
 extern shannon_sector_t get_bi_sector(shannon_bio_t *bio);
 extern int shannon_bio_flagged(shannon_bio_t *bio, unsigned int flag);
 extern unsigned long shannon_bio_data_dir(shannon_bio_t *bio);
-extern void shannon_complete_fs_io(void *hostdata, shannon_gendisk_t *gd, struct shannon_bio *sbio);
 extern void shannon_fio_cpumask_set(struct shannon_dev *sdev);
 extern int shannon_make_request(shannon_request_queue_t *q, shannon_bio_t *bio);
 extern int shannon_make_request_ns(shannon_request_queue_t *q, shannon_bio_t *bio);
 extern int shannon_convert_lreq(struct shannon_dev *sdev, struct shannon_bio *sbio, shannon_lreq_t *lreq);
 extern int shannon_disk_xfer_request(struct shannon_dev *sdev, struct request *rq);
-
+extern void shannon_complete_fs_io(void *hostdata,
+				   shannon_gendisk_t *gd,
+				   shannon_request_queue_t *q,
+				   struct shannon_bio *sbio);
 
 //  blk-mq.h
 struct blk_mq_hw_ctx;

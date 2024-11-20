@@ -229,7 +229,7 @@ int shannon_rt_queue_work(struct shannon_rt_workqueue_struct *rtwq, struct shann
 	int ret = 0;
 	flags = shannon_spin_lock_irqsave(&rtwq->lock);
 	if (!shannon_test_and_set_bit(RT_WORK_STRUCT_PENDING_BIT, &work->flags)) {
-		BUG_ON(!shannon_list_empty(&work->list));
+		SHN_BUG_ON(!shannon_list_empty(&work->list));
 		shannon_list_add_tail(&work->list, &rtwq->list);
 	} else
 		ret = -1;

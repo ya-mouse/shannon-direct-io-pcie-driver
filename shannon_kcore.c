@@ -1,4 +1,3 @@
-#include "shannon_kcore.h"
 #include <linux/spinlock.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
@@ -17,6 +16,8 @@
 #include <linux/random.h>
 #include <linux/prefetch.h>
 #include <linux/printk.h>
+#include "shannon_port.h"
+#include "shannon_kcore.h"
 
 /*  @BEGIN of spinlock wrapper */
 #ifndef CONFIG_PROVE_LOCKING
@@ -657,18 +658,17 @@ void *shannon_vmalloc(unsigned long size)
 	return vmalloc(size);
 }
 
-void *__shannon_vmalloc(unsigned long size, shannon_gfp_t gfp_mask, shannon_pgprot_t prot)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+void *__shannon_vmalloc(unsigned long size, shannon_gfp_t gfp_mask)
 {
-#if LINUX_VERSION_CODE > KERNEL_VERSION(5, 8, 0)
-/*
- * Remove "prot" parameter (prot is always PAGE_KERNEL):
- *   https://github.com/torvalds/linux/commit/88dca4ca5a93d2c09e5bbc6a62fbfc3af83c4fca
- */
 	return __vmalloc(size, gfp_mask);
-#else
-	return __vmalloc(size, gfp_mask, *((pgprot_t *)&prot));
-#endif
 }
+#else
+void *__shannon_vmalloc(unsigned long size, shannon_gfp_t gfp_mask)
+{
+	return __vmalloc(size, gfp_mask, PAGE_KERNEL);
+}
+#endif
 
 void shannon_vfree(void *addr)
 {
@@ -915,7 +915,8 @@ int shannon_get_count_order(unsigned int count)
 /* pm_qos_params.h */
 int shannon_pm_qos_value = 1;
 int shannon_pm_qos_disable = 0;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0) ||	\
+	(defined(SHANNON_RHEL_RELEASE_OVER_8_3))
 /*
  * Function being renamed from 5.7:
  *   https://github.com/torvalds/linux/commit/67b06ba01857ed077e1a66bfa139156e7c68bab2
@@ -931,6 +932,11 @@ int shannon_pm_qos_add_requirement(shannon_pm_qos_request_t *l, int qos, char *n
 	if (*l == NULL)
 		return 0;
 
+	if (unlikely(qos != SHANNON_PM_QOS_CPU_DMA_LATENCY)) {
+		shannon_warn("The pm_qos_class is %d rather than SHANNON_PM_QOS_CPU_DMA_LATENCY.\n", qos);
+		return 0;
+	}
+
 	cpu_latency_qos_add_request((struct pm_qos_request *)(*l), value);
 	return 0;
 }
@@ -939,6 +945,11 @@ int shannon_pm_qos_update_requirement(shannon_pm_qos_request_t *l, int qos, char
 {
 	if (unlikely(shannon_pm_qos_disable))
 		return 0;
+
+	if (unlikely(qos != SHANNON_PM_QOS_CPU_DMA_LATENCY)) {
+		shannon_warn("The pm_qos_class is %d rather than SHANNON_PM_QOS_CPU_DMA_LATENCY.\n", qos);
+		return 0;
+	}
 
 	if (*l != NULL)
 		cpu_latency_qos_update_request((struct pm_qos_request *)(*l), new_value);
@@ -949,6 +960,11 @@ void shannon_pm_qos_remove_requirement(shannon_pm_qos_request_t *l, int qos, cha
 {
 	if (unlikely(shannon_pm_qos_disable))
 		return;
+
+	if (unlikely(qos != SHANNON_PM_QOS_CPU_DMA_LATENCY)) {
+		shannon_warn("The pm_qos_class is %d rather than SHANNON_PM_QOS_CPU_DMA_LATENCY.\n", qos);
+		return;
+	}
 
 	if (*l != NULL) {
 		cpu_latency_qos_remove_request((struct pm_qos_request *)(*l));
@@ -962,12 +978,19 @@ int shannon_pm_qos_is_required(int qos)
 	if (unlikely(shannon_pm_qos_disable))
 		return 1;
 
-	// FIXME: unexported function
-	// return (cpu_latency_qos_limit() == shannon_pm_qos_value);
-	return 1;
-}
+	if (unlikely(qos != SHANNON_PM_QOS_CPU_DMA_LATENCY)) {
+		shannon_warn("The pm_qos_class is %d rather than SHANNON_PM_QOS_CPU_DMA_LATENCY.\n", qos);
+		return 1; /* Returns true, prevent subsequent PM/CPU_LATENCY QOS modifications. */
+	}
 
+	// cpu_latency_qos_limit() is declared in linux/pm_qos.h, but not exported by EXPORT_SYMBOL_GPL(),
+	// which means we could never know if our qos requiement is met. So we must return 0, notifies the
+	// outer logic to update the QoS requirements.
+	// return (cpu_latency_qos_limit() == shannon_pm_qos_value);
+	return 0;
+}
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(3, 2, 0)
+
 #include <linux/pm_qos.h>
 int shannon_pm_qos_add_requirement(shannon_pm_qos_request_t *l, int qos, char *name, s32 value)
 {
@@ -989,7 +1012,7 @@ int shannon_pm_qos_update_requirement(shannon_pm_qos_request_t *l, int qos, char
 		return 0;
 
 	if (*l != NULL)
-		dev_pm_qos_update_request((struct pm_qos_request *)(*l), new_value);
+		pm_qos_update_request((struct pm_qos_request *)(*l), new_value);
 	return 0;
 }
 
@@ -1015,6 +1038,7 @@ int shannon_pm_qos_is_required(int qos)
 
 
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 36)
+
 #include <linux/pm_qos_params.h>
 int shannon_pm_qos_add_requirement(shannon_pm_qos_request_t *l, int qos, char *name, s32 value)
 {

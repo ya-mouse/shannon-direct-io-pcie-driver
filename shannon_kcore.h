@@ -12,6 +12,7 @@
  * TODO: remove these header files, provide cross platform portabilty.
  */
 #include <linux/types.h>
+#include <linux/blkdev.h>
 #include <linux/gfp.h>
 #include <linux/errno.h>
 #include <linux/ioctl.h>
@@ -290,7 +291,7 @@ extern shannon_kmem_cache_t *shannon_kmem_cache_create(const char *, size_t, siz
 extern void shannon_kmem_cache_destroy(shannon_kmem_cache_t *cachep);
 extern void *shannon_kzalloc(size_t size, shannon_gfp_t flags);
 extern void *shannon_kmalloc(size_t size, shannon_gfp_t flags);
-extern void *__shannon_vmalloc(unsigned long size, shannon_gfp_t gfp_mask, shannon_pgprot_t prot);
+extern void *__shannon_vmalloc(unsigned long size, shannon_gfp_t gfp_mask);
 extern void shannon_kfree(const void *);
 
 //  mempool.h
@@ -439,5 +440,21 @@ const char *get_disk_name(struct shannon_disk *sdisk);
 	shannon_err("%s: " format, get_pool_name_safe(spool), ##arg)
 #define shannon_warn_pool(spool, format, arg...)			\
 	shannon_warn("%s: " format, get_pool_name_safe(spool), ##arg)
+
+#define SHN_BUG_ON(condition)	\
+	do {	\
+		if (condition) {	\
+			shannon_err("file=%s line=%d:\n", __FILE__, __LINE__);	\
+			BUG_ON(condition);	\
+		}	\
+	} while (0)
+
+#define SHN_WARN_ON(condition)	\
+	do {	\
+		if (condition) {	\
+			shannon_err("file=%s line=%d:\n", __FILE__, __LINE__);	\
+			WARN_ON(condition);	\
+		}	\
+	} while (0)
 
 #endif /* __SHANNON_KCORE_H */

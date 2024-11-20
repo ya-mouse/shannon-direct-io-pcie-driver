@@ -1,10 +1,10 @@
-#include "shannon_sched.h"
 #include <linux/kernel.h>
 #include <linux/interrupt.h>
 #include <linux/sched.h>
 #include <linux/kthread.h>
 #include <linux/version.h>
-
+#include "shannon_sched.h"
+#include "shannon_port.h"
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 9, 0)
 #include <linux/sched/rt.h>
 #endif
@@ -211,7 +211,8 @@ int shannon_set_node_cpus_allowed(shannon_task_struct_t *k, int node)
 
 bool shannon_not_set_cpumask(shannon_cpumask_struct_t *scpumask)
 {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 28)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0) ||	\
+		(defined(SHANNON_RHEL_RELEASE_OVER_8_3))
 	return cpumask_full((cpumask_t*)scpumask);
 #else
 	return bitmap_full(((cpumask_t *)scpumask)->bits, (unsigned int)NR_CPUS);
