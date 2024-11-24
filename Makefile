@@ -30,7 +30,10 @@ TARGET_OBJS := $(SHIPPED_OBJS:.o_shipped=.o)
 shipped: $(TARGET_OBJS)
 
 %.o: %.o_shipped
-	objcopy --redefine-sym printk=_printk $< $@
+	objcopy \
+		--redefine-sym printk=_printk \
+		--weaken-symbol shannon_attach_sdev \
+		$< $@
 	truncate -s 0 .$@.cmd
 
 clean modules_clean:

@@ -61,7 +61,7 @@ int shannon_attach_sdev(struct shannon_dev *sdev) {
     // Initialize disk parameters
     int major = sdev->major;          // offset 0x31bc
     int minor = sdev->minor;          // offset 0x31b8
-    char *name = sdev->dev_name;      // offset 0xd3e0
+    char *name = sdev->disk_name;     // offset 0xd3e0
     
     // Initialize the disk structure
     shannon_init_gendisk(disk, name, major, 64, minor << 6, queue, sdev);
@@ -108,12 +108,12 @@ int shannon_attach_sdev(struct shannon_dev *sdev) {
     uint64_t bytes = sdev->capacity << 9;
     uint64_t gigabytes = bytes / 1000000000;
     
-    int param3 = sdev->param3;        // offset 0xda68
+    int logicb_size = sdev->logicb_size;        // offset 0xda68
     int param4 = sdev->param4;        // offset 0xda74
     
     shannon_printk_ratelimited(KERN_INFO, 
         "Device metrics: %llu GB, %d.%d performance, params: %d, %d\n",
-        gigabytes, quotient, remainder, param3, param4);
+        gigabytes, quotient, remainder, logicb_size, param4);
 
     return 0;
 }
@@ -657,10 +657,19 @@ int shannon_convert_bio(struct shannon_bio *sbio, shannon_bio_t *lbio, unsigned 
 
 	int page_offset, mappable_size;
 
+	if (!logicb_size) {
+		debugs0("logicb_size is zero\n");
+		return -EINVAL;
+	}
+
+	debugs0("lbio=0x%08x logicb_size=0x%08x.\n", lbio, logicb_size);
 	sbio->bio_size = get_bi_size(lbio);
+	debugs0("bio_size=0x%08x.\n", sbio->bio_size);
 
 	sbio->segments = shannon_bio_segments(lbio);
+	debugs0("segments=0x%08x.\n", sbio->segments);
 	sbio->sg_count = 2 * (((sbio->bio_size + logicb_size - 1)/logicb_size) + sbio->segments);
+	debugs0("sg_count=0x%08x.\n", sbio->sg_count);
 
 	sbio->sg = shannon_sg_alloc(sbio->sg_count, GFP_SHANNON);
 	if (sbio->sg == NULL) {
@@ -878,6 +887,7 @@ void submit_sbio_task(struct shannon_work_struct *work)
 	int ret;
 
 	ret = shannon_submit_bio(sdev, sbio);
+	debugs0("shannon_submit_bio ret=%d.\n", ret);
 	if (ret) {
 		shannon_end_io_acct(get_gendisk_from_sdev(sdev), get_req_queue_from_sdev(sdev), sbio->bio, sbio->start_time);
 		if (sbio->sg) {
@@ -942,8 +952,10 @@ int shannon_make_request(shannon_request_queue_t *q, shannon_bio_t *bio)
 	unsigned int logicb_size = get_logicb_size(sdev);
 	unsigned int logicb_shift = get_logicb_shift(sdev);
 
-	if (shannon_check_availability(sdev))
+	debugs0("q=0x%08x bio=0x%08x sdev=0x%08x.\n", q, bio, sdev);
+	if (!sdev || shannon_check_availability(sdev))
 	{
+		debugs0("ret einval\n");
 		shannon_bio_endio(bio, -EIO);
 		return 0;
 	}
@@ -959,15 +971,18 @@ int shannon_make_request(shannon_request_queue_t *q, shannon_bio_t *bio)
 		trim_end = trim_end >> (logicb_shift - 9);
 		shannon_discard(sdev, trim_start, trim_end);
 		shannon_bio_endio(bio, 0);
+		debugs0("ret trim\n");
 		return 0;
 	}
 
 	if (unlikely(get_bi_size(bio) == 0)) {
+		debugs0("ret === 0.\n");
 		shannon_bio_endio(bio, 0);
 		return 0;
 	}
 
 	if (unlikely(shannon_disk_readonly(sdev)) && (shannon_bio_data_dir(bio) == LINUX_BIO_WRITE)) {
+		debugs0("ret=-EIO.\n");
 		shannon_bio_endio(bio, -EIO);
 		return 0;
 	}
@@ -1030,6 +1045,7 @@ free_sg_list:
 	}
 free_sbio:
 	free_sbio(sbio);
+	debugs0("ret=%d.\n", ret);
 	shannon_bio_endio(bio, ret);
 	return 0;
  }

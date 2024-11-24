@@ -441,10 +441,10 @@ struct shannon_dev {
     struct shannon_request_queue *queue;     // 0xc720
     struct gendisk *disk;                    // 0xc728
     unsigned char   _pad10[0xcb0];           // 0xc730 - 0xda67
-    char           dev_name[16];             // 0xd3e0 - 0xe3df
+    char           disk_name[16];            // 0xd3e0 - 0xe3df
 	__u64   	   capacity;                 // 0xd3f0
 	unsigned char   _pad11[0x670];           // 0xd3f8 - 0xe3df
-    __u32          param3;                   // 0xda68
+    __u32          logicb_size;              // 0xda68
     unsigned char   _pad7[0x8];              // 0xda6c - 0xda73
     __u32          param4;                   // 0xda74
     unsigned char   _pad8[0x20];             // 0xda78 - 0xda97

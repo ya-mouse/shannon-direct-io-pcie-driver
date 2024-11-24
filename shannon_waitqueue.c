@@ -83,6 +83,7 @@ void shannon_prepare_to_wait(shannon_wait_queue_head_t *q, shannon_wait_queue_t 
 {
 	unsigned long flags;
 
+	// debugs0("q=0x%08x wait=0x%08x state=0x%08x.\n", q, wait, state);
 	wait->flags &= ~WQ_FLAG_EXCLUSIVE;
 	spin_lock_irqsave((spinlock_t *)&q->lock, flags);
 	if (shannon_list_empty(&wait->task_list))
