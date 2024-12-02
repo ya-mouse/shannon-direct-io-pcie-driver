@@ -27,11 +27,16 @@ all: shipped modules
 SHIPPED_OBJS := $(wildcard *.o_shipped)
 TARGET_OBJS := $(SHIPPED_OBJS:.o_shipped=.o)
 
+KVER_MAJOR := $(shell echo $(KERNELVER) | cut -d. -f1)
+
+ifeq ($(shell test "$(KVER_MAJOR)" -ge 6; echo $$?),0)
+OBJDUMP_REDEF := --redefine-sym printk=_printk
+endif
+
 shipped: $(TARGET_OBJS)
 
 %.o: %.o_shipped
-	objcopy \
-		--redefine-sym printk=_printk \
+	objcopy $(OBJDUMP_REDEF) \
 		--weaken-symbol shannon_attach_sdev \
 		$< $@
 	truncate -s 0 .$@.cmd
