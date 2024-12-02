@@ -44,6 +44,12 @@ struct __shannon_rwlock {
 typedef struct __shannon_spinlock shannon_spinlock_t;
 typedef struct __shannon_rwlock shannon_rwlock_t;
 
+struct __shannon_wait_queue_head {
+	shannon_spinlock_t lock;
+	struct shannon_list_head task_list;
+};
+typedef struct __shannon_wait_queue_head shannon_wait_queue_head_t;
+
 #ifdef CONFIG_PROVE_LOCKING
 
 #define shannon_spin_lock_init(_lock)				\
@@ -421,40 +427,56 @@ struct __shannon_kobject {
 typedef struct __shannon_kobject shannon_kobject_t;
 
 struct shannon_dev {
-    unsigned char   _pad0[0xb2c];            // 0x0000 - 0x0b2b
+    unsigned char   _pad0[0xb2c];            // 0x0000
     __u32          counter1;                 // 0x0b2c
     __u32          counter2;                 // 0x0b30
-    unsigned char   _pad1[0x233c];           // 0x0b34 - 0x2e6f (9020 bytes)
-    __u32          perf_metric;              // 0x2e70
-    unsigned char   _pad2[0x20];             // 0x2e74 - 0x2e93
+    unsigned char   _pad1[0x154];            // 0x0b34
+	shannon_atomic_t atomic_counter;         // 0x0c88
+	unsigned char   _pad1_1[0x1f18];         // 0x0c90
+	__u32          value_at_0x2ba8;          // 0x2ba8
+	unsigned char   _pad1_2[0x2c4];          // 0x0c8c
+    __u32          over_provision;           // 0x2e70
+    unsigned char   _pad2[0x20];             // 0x2e74
     __u32          param1;                   // 0x2e94
-    unsigned char   _pad3[0x320];            // 0x2e98 - 0x31b7
+    unsigned char   _pad3[0x318];            // 0x2e98
+	__u32          value_at_0x31b0;          // 0x31b0
+	__u32          value_at_0x31b4;          // 0x31b4
     __u32          minor;                    // 0x31b8
     __u32          major;                    // 0x31bc
-    unsigned char   _pad4[0x110];            // 0x31c0 - 0x32cf
-    char           name[256];                // 0x32d0 - 0x33cf
-    unsigned char   _pad5[0x260];            // 0x33d0 - 0x362f
+    unsigned char   _pad4[0x110];            // 0x31c0
+    char           name[256];                // 0x32d0
+    unsigned char   _pad5[0x18];             // 0x33d0
+	__u32          value_at_0x33e8;          // 0x33e8
+    unsigned char   _pad5_1[0x244];          // 0x33ec
     __u64          limit1;                   // 0x3630
-    unsigned char   _pad5_1[8];              // 0x3638
+    unsigned char   _pad5_2[8];              // 0x3638
     __u64          limit2;                   // 0x3640
-    unsigned char   _pad6[0x90d8];           // 0x3648 - 0xc2cf
+    unsigned char   _pad6[0x90d8];           // 0x3648
     struct shannon_request_queue *queue;     // 0xc720
     struct gendisk *disk;                    // 0xc728
-    unsigned char   _pad10[0xcb0];           // 0xc730 - 0xda67
-    char           disk_name[16];            // 0xd3e0 - 0xe3df
+    unsigned char   _pad10[0xca8];           // 0xc730
+	__u32          value_at_0xd3d8;          // 0xd3d8
+    unsigned char   _pad10_1[4];             // 0xd3dc
+    char           disk_name[16];            // 0xd3e0
 	__u64   	   capacity;                 // 0xd3f0
-	unsigned char   _pad11[0x670];           // 0xd3f8 - 0xe3df
+	unsigned char   _pad11[0xb8];            // 0xd3f8
+	__u32		   value_at_0xd4b0;          // 0xd4b0
+	unsigned char   _pad11_1[0x1dc];         // 0xd4b4
+	shannon_wait_queue_head_t wait_queue_head; // 0xd690
+	unsigned char   _pad11_2[0x344];         // 0xd720
+    __u32          logicb_shift;             // 0xda64
     __u32          logicb_size;              // 0xda68
-    unsigned char   _pad7[0x8];              // 0xda6c - 0xda73
+    unsigned char   _pad7[0x8];              // 0xda6c
     __u32          param4;                   // 0xda74
-    unsigned char   _pad8[0x20];             // 0xda78 - 0xda97
+    unsigned char   _pad8[0x20];             // 0xda78
     __u32          param2;                   // 0xda98
-    unsigned char   _pad9[0x834];            // 0xda9c - 0xe3df
+    unsigned char   _pad9[0x834];            // 0xda9c
 	shannon_kobject_t kobj;                  // 0xe2d0
 	unsigned char  _pad12[152];              // 0xe368
     __u32          state;                    // 0xe400
 } __attribute__((packed));
 
+static_assert(offsetof(struct shannon_dev, value_at_0x2ba8) == 0x2ba8, "Wrong offset for 0xd69c");
 static_assert(offsetof(struct shannon_dev, kobj) == 0xe2d0, "Wrong offset for kobj");
 static_assert(offsetof(struct shannon_dev, _pad12) == 0xe368, "Wrong offset for kobj");
 static_assert(offsetof(struct shannon_dev, state) == 0xe400, "Wrong offset for state");

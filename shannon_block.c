@@ -42,9 +42,9 @@ struct shannon_blk_mq_data {
 
 int shannon_attach_sdev(struct shannon_dev *sdev) {
     // Check if disk is already attached
-	debugs0("sdev=0x%08x name=%s.\n", sdev, sdev->name);
+	debugs0("sdev=0x%08x name=%s logicb_size=%u.\n", sdev, sdev->name, sdev->logicb_size);
     if (sdev->disk != NULL) {  // checking offset 0xc728
-        shannon_printk(KERN_ERR, "%s: disk already attached\n", sdev->name);
+        shannon_err("%s: gendisk /dev/%s already exists.\n", sdev->name, sdev->disk_name);
         return -1;
     }
 
@@ -53,7 +53,7 @@ int shannon_attach_sdev(struct shannon_dev *sdev) {
 	debugs0(">>> queue=0x%08x.\n", queue);
     struct gendisk *disk = shannon_alloc_disk(queue, 64);  // 0x40
     if (disk == NULL) {
-        shannon_printk(KERN_ERR, "%s: alloc disk failed\n", sdev->name);
+        shannon_err("%s: alloc disk failed\n", sdev->name);
         return -1;
     }
     sdev->disk = disk;
@@ -73,7 +73,12 @@ int shannon_attach_sdev(struct shannon_dev *sdev) {
     if (sdev->limit1 > sdev->limit2) {  // offsets 0x3630, 0x3640
         sdev->limit2 = sdev->limit1;
     }
-    
+
+    // Initialize some device parameters
+    sdev->state = 2;           // offset 0xe400
+    sdev->counter1 = 0;        // offset 0xb2c
+    sdev->counter2 = sdev->param1 * sdev->param2 * 3;  // offsets 0x2e94, 0xda98, 0xb30
+
     // Add disk to system
     if (shannon_add_disk(disk)) {
         shannon_printk(KERN_ERR, "%s: add_disk failed\n", sdev->name);
@@ -85,35 +90,18 @@ int shannon_attach_sdev(struct shannon_dev *sdev) {
 	debugs0("sysfs=0x%08x name=%s.\n", &sdev->kobj, sdev->name);
     int ret = shannon_sysfs_link(&sdev->kobj);  // offset 0xe2d0
     if (ret != 0) {
-        shannon_printk(KERN_ERR, "%s: sysfs link failed\n", sdev->name);
+        shannon_err("link kobject to sysfs failed.\n", sdev->name);
         shannon_detach(sdev);
         return -1;
     }
 
-	debugs1("Attached disk %s\n", name);
+	debugs1("sysfs object link done.\n\n", name);
 
-    // Initialize some device parameters
-    sdev->state = 2;           // offset 0xe400
-    sdev->counter1 = 0;        // offset 0xb2c
-    sdev->counter2 = (sdev->param1 * sdev->param2) * 3;  // offsets 0x2e94, 0xda98, 0xb30
+    shannon_info("Attached Direct-IO PCIe Flash /dev/%s as block device /dev/%s:\n", sdev->name, name);
 
-    // Print device information
-    shannon_printk_ratelimited(KERN_INFO, "%s: Device %s initialized\n", sdev->name, name);
-
-    // Calculate and print some performance metrics
-    int value = sdev->perf_metric;    // offset 0x2e70
-    int quotient = value / 100;
-    int remainder = value % 100;
-    
-    uint64_t bytes = sdev->capacity << 9;
-    uint64_t gigabytes = bytes / 1000000000;
-    
-    int logicb_size = sdev->logicb_size;        // offset 0xda68
-    int param4 = sdev->param4;        // offset 0xda74
-    
-    shannon_printk_ratelimited(KERN_INFO, 
-        "Device metrics: %llu GB, %d.%d performance, params: %d, %d\n",
-        gigabytes, quotient, remainder, logicb_size, param4);
+    shannon_info("sector size: logical %d / physical %d, capacity: %d GB, overprovision: %d.%d%%.\n",
+        sdev->param4, sdev->logicb_size, (sdev->capacity << 9) / 1000000000,
+		sdev->over_provision / 100, sdev->over_provision % 100);
 
     return 0;
 }
@@ -952,7 +940,10 @@ int shannon_make_request(shannon_request_queue_t *q, shannon_bio_t *bio)
 	unsigned int logicb_size = get_logicb_size(sdev);
 	unsigned int logicb_shift = get_logicb_shift(sdev);
 
-	debugs0("q=0x%08x bio=0x%08x sdev=0x%08x.\n", q, bio, sdev);
+	debugs0("q=0x%08x bio=0x%08x sdev=0x%08x  logicb_size=%u logicb_shift=%u.\n", q, bio, sdev, logicb_size, logicb_shift);
+	if (sdev) {
+		debugs0("31b4=%d 33e8=%d d3d8=%d\n", sdev->value_at_0x31b4, sdev->value_at_0x33e8, sdev->value_at_0xd3d8);
+	}
 	if (!sdev || shannon_check_availability(sdev))
 	{
 		debugs0("ret einval\n");

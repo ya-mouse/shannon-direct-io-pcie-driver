@@ -5,12 +5,6 @@
 #include "shannon_sched.h"
 #include "shannon_list.h"
 
-struct __shannon_wait_queue_head {
-	shannon_spinlock_t lock;
-	struct shannon_list_head task_list;
-};
-typedef struct __shannon_wait_queue_head shannon_wait_queue_head_t;
-
 struct shannon_lock_class_key {
 	RESERVE_MEM(16);
 };
