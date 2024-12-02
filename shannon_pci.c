@@ -440,7 +440,7 @@ clear:
 static void shannon_pci_dev_d3_sleep(struct pci_dev *dev)
 {
 	unsigned int delay = 100;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
 /*
  * Field rename:
  *   https://lore.kernel.org/r/20200730210848.1578826-1-kw@linux.com

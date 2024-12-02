@@ -105,7 +105,7 @@ void shannon_device_destroy(shannon_class_t *cls, shannon_dev_t devt)
 
 shannon_class_t *shannon_class_create(shannon_module_t *owner, char *name)
 {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
 	return class_create(name);
 #else
 	return class_create((struct module *)owner, name);
@@ -159,7 +159,7 @@ int shannon_disk_in_flight(shannon_gendisk_t *gdt)
 	return atomic_read((atomic_t *)(&gd->part0.in_flight));
 }
 
-#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
 
 static inline void shannon_part_inc_in_flight(struct block_device *part, int rw)
 {
@@ -257,7 +257,7 @@ int shannon_disk_in_flight(shannon_gendisk_t *gdt)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0) || defined(SHANNON_RHEL_RELEASE_OVER_8_0)
 	inflight = 0;
 	for_each_possible_cpu(cpu) {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
 		inflight += part_stat_local_read_cpu(gd->part0, in_flight[0], cpu) + \
 			part_stat_local_read_cpu(gd->part0, in_flight[1], cpu);
 #else

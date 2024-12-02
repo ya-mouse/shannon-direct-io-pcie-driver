@@ -1233,7 +1233,7 @@ void shannon_prefetchw(void *addr)
 	prefetchw(addr);
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
 static inline void spin_lock_prefetch(const void *x)
 {
 	prefetchw(x);
