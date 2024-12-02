@@ -118,10 +118,17 @@ static struct lock_class_key shannon_bio_compl_lkclass;
 //  genhd.h
 shannon_gendisk_t *shannon_alloc_disk(shannon_request_queue_t *rq, int minors)
 {
+	struct request_queue *queue = (struct request_queue *)rq;
 	struct gendisk *disk;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
-	disk = blk_mq_alloc_disk_for_queue((struct request_queue *)rq, &shannon_bio_compl_lkclass);
-	debugs0("disk=0x%08x err=%d minors=%d q=0x%08x td=0x%08x.\n", disk, IS_ERR(disk), minors, disk->queue, disk->queue->td);
+	if (queue->queuedata) {
+		disk = queue->queuedata;
+		disk->queue->queuedata = disk->private_data;
+	} else {
+		disk = blk_mq_alloc_disk_for_queue(queue, &shannon_bio_compl_lkclass);
+	}
+
+	debugs0("disk=0x%08x err=%d minors=%d q=0x%08x td=0x%08x dp=0x%08x.\n", disk, IS_ERR(disk), minors, disk->queue, disk->queue->td, queue->queuedata);
 	if (IS_ERR(disk))
 	{
 		SHN_BUG_ON(IS_ERR(disk));
@@ -132,7 +139,7 @@ shannon_gendisk_t *shannon_alloc_disk(shannon_request_queue_t *rq, int minors)
 	disk = alloc_disk(minors);
 	if (!disk)
 		return NULL;
-	disk->queue = (struct request_queue *)rq;
+	disk->queue = queue;
 	debugs0("disk=0x%08x err=%d minors=%d q=0x%08x td=0x%08x.\n", disk, IS_ERR(disk), minors, disk->queue, disk->queue->td);
 	return disk;
 #endif
@@ -155,9 +162,11 @@ int shannon_init_gendisk(shannon_gendisk_t *disk, char *name, int major, int min
 	/* dfX is a conventional disk; pXvolX is namespace. */
 	if (*name != 'd')
 		gd->fops = &shannon_ops_ns;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
 	/* disable submit_bio for ioscheduler and non-ns mode */
 	else if (shannon_use_iosched)
 		shannon_ops.submit_bio = NULL;
+#endif
 
 	return 0;
 }
@@ -647,14 +656,10 @@ int shannon_convert_bio(struct shannon_bio *sbio, shannon_bio_t *lbio, unsigned 
 		return -EINVAL;
 	}
 
-	debugs0("lbio=0x%08x logicb_size=0x%08x.\n", lbio, logicb_size);
 	sbio->bio_size = get_bi_size(lbio);
-	debugs0("bio_size=0x%08x.\n", sbio->bio_size);
 
 	sbio->segments = shannon_bio_segments(lbio);
-	debugs0("segments=0x%08x.\n", sbio->segments);
 	sbio->sg_count = 2 * (((sbio->bio_size + logicb_size - 1)/logicb_size) + sbio->segments);
-	debugs0("sg_count=0x%08x.\n", sbio->sg_count);
 
 	sbio->sg = shannon_sg_alloc(sbio->sg_count, GFP_SHANNON);
 	if (sbio->sg == NULL) {
@@ -872,7 +877,6 @@ void submit_sbio_task(struct shannon_work_struct *work)
 	int ret;
 
 	ret = shannon_submit_bio(sdev, sbio);
-	debugs0("shannon_submit_bio ret=%d.\n", ret);
 	if (ret) {
 		shannon_end_io_acct(get_gendisk_from_sdev(sdev), get_req_queue_from_sdev(sdev), sbio->bio, sbio->start_time);
 		if (sbio->sg) {
@@ -937,10 +941,6 @@ int shannon_make_request(shannon_request_queue_t *q, shannon_bio_t *bio)
 	unsigned int logicb_size = get_logicb_size(sdev);
 	unsigned int logicb_shift = get_logicb_shift(sdev);
 
-	debugs0("q=0x%08x bio=0x%08x sdev=0x%08x  logicb_size=%u logicb_shift=%u.\n", q, bio, sdev, logicb_size, logicb_shift);
-	if (sdev) {
-		debugs0("31b4=%d 33e8=%d d3d8=%d\n", sdev->value_at_0x31b4, sdev->value_at_0x33e8, sdev->value_at_0xd3d8);
-	}
 	if (!sdev || shannon_check_availability(sdev))
 	{
 		debugs0("ret einval\n");
@@ -1627,7 +1627,6 @@ blk_status_t shannon_disk_request(struct blk_mq_hw_ctx *hctx,
 	struct shannon_blk_mq_data *data = rq->q->queuedata;
 	struct shannon_dev *sdev = data->original_data;
 
-	// debugs1("shannon_disk_request\n");
 	blk_mq_start_request(rq);
 
 	result = shannon_disk_xfer_request(sdev, rq);
@@ -1779,20 +1778,25 @@ static shannon_request_queue_t *shannon_init_queue(void *data, shannon_spinlock_
 #endif // LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
-struct request_queue *blk_alloc_queue(int node_id);
-
 static shannon_request_queue_t *shannon_alloc_queue(void *data, int ns)
 {
-	struct request_queue *queue = NULL;
+	struct gendisk *disk = NULL;
 
 	/*
 	 * blk_alloc_queue() is not exported since:
 	 *    https://patchwork.kernel.org/project/linux-nvdimm/patch/20210521055116.1053587-27-hch@lst.de/#24196935
 	 */
-	// queue = blk_alloc_queue(NUMA_NO_NODE);
-	if (queue)
-		queue->queuedata = data;
-	return queue;
+	disk = blk_alloc_disk(NUMA_NO_NODE);
+	if (IS_ERR(disk))
+	{
+		SHN_BUG_ON(IS_ERR(disk));
+		return NULL;
+	}
+	disk->private_data = data;
+	disk->queue->queuedata = disk;
+	debugs0("disk=0x%08x data=0x%08x\n", disk, data);
+
+	return disk->queue;
 }
 
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
