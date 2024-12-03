@@ -60,12 +60,14 @@ extern struct shannon_pool *spool_get_reference(struct shannon_pool *);
 extern void spool_put_reference(struct shannon_pool *);
 
 //  blkdev operations
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
 static int shannon_revalidate(struct gendisk *disk)
 {
 	struct shannon_dev *dev = disk->private_data;
 	set_capacity(disk, get_shannon_dev_sectors(dev));
 	return 0;
 }
+#endif
 
 static int shannon_getgeo(struct block_device *bdev, struct hd_geometry *geo)
 {
@@ -82,12 +84,14 @@ static int shannon_getgeo(struct block_device *bdev, struct hd_geometry *geo)
 	return 0;
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
 static int shannon_revalidate_ns(struct gendisk *disk)
 {
 	struct shannon_namespace *ns = disk->private_data;
 	set_capacity(disk, get_shannon_ns_sectors(ns));
 	return 0;
 }
+#endif
 
 static int shannon_getgeo_ns(struct block_device *bdev, struct hd_geometry *geo)
 {
@@ -104,7 +108,7 @@ static int shannon_getgeo_ns(struct block_device *bdev, struct hd_geometry *geo)
 	return 0;
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
 /*
  * https://github.com/torvalds/linux/commit/4a6f3d480edc3570a8059f3a0fb388641b6ec73f
  * https://github.com/torvalds/linux/commit/444aa2c58cb3b6cfe3b7cc7db6c294d73393a894
@@ -121,7 +125,24 @@ static void shannon_submit_bio_ns(struct bio *bio)
     struct request_queue *q = bio->bi_bdev->bd_disk->queue;
     shannon_make_request_ns(q, bio);
 }
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
+static blk_qc_t shannon_submit_bio(struct bio *bio)
+{
+    struct request_queue *q = bio->bi_bdev->bd_disk->queue;
+    shannon_make_request(q, bio);
+	return BLK_QC_T_NONE;
+}
 
+// New submit_bio implementation for namespace that uses existing make_request logic
+static blk_qc_t shannon_submit_bio_ns(struct bio *bio)
+{
+    struct request_queue *q = bio->bi_bdev->bd_disk->queue;
+    shannon_make_request_ns(q, bio);
+	return BLK_QC_T_NONE;
+}
+#endif
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
 static int shannon_open(struct gendisk *disk, fmode_t mode)
 {
 	struct shannon_dev *dev = disk->private_data;
@@ -202,8 +223,10 @@ static int shannon_release_ns(struct gendisk *gd, fmode_t mode)
 struct block_device_operations shannon_ops = {
 	.owner		= THIS_MODULE,
 	.getgeo		= shannon_getgeo,
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 8, 0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0)
 	.revalidate_disk = shannon_revalidate,
+#else
+	.submit_bio	= shannon_submit_bio,
 #endif
 	.open		= shannon_open,
 	.release	= shannon_release,
@@ -250,7 +273,7 @@ struct block_device_operations shannon_ops = {
 struct block_device_operations shannon_ops_ns = {
 	.owner		= THIS_MODULE,
 	.getgeo		= shannon_getgeo_ns,
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 8, 0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0)
 	.revalidate_disk = shannon_revalidate_ns,
 #else
 	.submit_bio	= shannon_submit_bio_ns,

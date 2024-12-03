@@ -28,8 +28,9 @@ SHIPPED_OBJS := $(wildcard *.o_shipped)
 TARGET_OBJS := $(SHIPPED_OBJS:.o_shipped=.o)
 
 KVER_MAJOR := $(shell echo $(KERNELVER) | cut -d. -f1)
+KVER_MINOR := $(shell echo $(KERNELVER) | cut -d. -f2)
 
-ifeq ($(shell test "$(KVER_MAJOR)" -ge 6; echo $$?),0)
+ifeq ($(shell test "$(KVER_MAJOR)" -ge 6 -o \( "$(KVER_MAJOR)" -eq 5 -a "$(KVER_MINOR)" -ge 15 \); echo $$?),0)
 OBJDUMP_REDEF := --redefine-sym printk=_printk
 endif
 

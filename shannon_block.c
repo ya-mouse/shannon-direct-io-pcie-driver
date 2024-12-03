@@ -120,12 +120,19 @@ shannon_gendisk_t *shannon_alloc_disk(shannon_request_queue_t *rq, int minors)
 {
 	struct request_queue *queue = (struct request_queue *)rq;
 	struct gendisk *disk;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
 	if (queue->queuedata) {
+		debugs0("qd=0x%08x (disk)\n", queue->queuedata);
 		disk = queue->queuedata;
 		disk->queue->queuedata = disk->private_data;
+		debugs0("disk pd=0x%08x\n", disk->private_data);
 	} else {
-		disk = blk_mq_alloc_disk_for_queue(queue, &shannon_bio_compl_lkclass);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+		if (shannon_use_iosched) // also *disk_name != 'd'
+			disk = blk_mq_alloc_disk_for_queue(queue, &shannon_bio_compl_lkclass);
+		else
+#endif
+			disk = blk_alloc_disk(NUMA_NO_NODE);
 	}
 
 	debugs0("disk=0x%08x err=%d minors=%d q=0x%08x td=0x%08x dp=0x%08x.\n", disk, IS_ERR(disk), minors, disk->queue, disk->queue->td, queue->queuedata);
@@ -162,7 +169,7 @@ int shannon_init_gendisk(shannon_gendisk_t *disk, char *name, int major, int min
 	/* dfX is a conventional disk; pXvolX is namespace. */
 	if (*name != 'd')
 		gd->fops = &shannon_ops_ns;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
 	/* disable submit_bio for ioscheduler and non-ns mode */
 	else if (shannon_use_iosched)
 		shannon_ops.submit_bio = NULL;
@@ -189,9 +196,8 @@ void shannon_put_disk(shannon_gendisk_t *disk)
 
 int shannon_add_disk(shannon_gendisk_t *disk)
 {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
 	struct gendisk *gd = (struct gendisk *)disk;
-	debugs0("disk=0x%08x queue_is_mq=%d poll_bio=0x%x\n", gd, queue_is_mq(gd->queue), gd->fops->poll_bio);
 	int err = add_disk(gd);
 	if (err) {
 		debugs0("disk_name=%s\n", gd->disk_name);
@@ -379,9 +385,7 @@ void shannon_blk_cleanup_queue(shannon_request_queue_t *q, int ns)
 		shannon_kfree(data);
 	}
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
-	// blk_cleanup_disk(nullb->disk);
-#else
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0)
 	blk_cleanup_queue(queue);
 #endif
 }
@@ -1138,7 +1142,7 @@ free_sbio:
 }
 
 //  make_request
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
 // nothing :)
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0)
 static blk_qc_t shannon_make_request_wrapper(struct request_queue *q, struct bio *bio)
@@ -1777,7 +1781,7 @@ static shannon_request_queue_t *shannon_init_queue(void *data, shannon_spinlock_
 }
 #endif // LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
 static shannon_request_queue_t *shannon_alloc_queue(void *data, int ns)
 {
 	struct gendisk *disk = NULL;
