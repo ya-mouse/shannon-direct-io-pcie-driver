@@ -43,7 +43,21 @@ void shannon_sg_mark_end(shannon_sg_list_t *sg)
 
 shannon_sg_list_t *shannon_sg_alloc(unsigned int nents, shannon_gfp_t gfp_mask)
 {
-	return kzalloc(sizeof(struct scatterlist) * nents, gfp_mask);
+    shannon_sg_list_t *sg;
+    size_t size;
+
+    /* Check for overflow */
+    if (unlikely(nents > SIZE_MAX / sizeof(struct scatterlist)))
+        return NULL;
+
+    size = sizeof(struct scatterlist) * nents;
+
+    /* Add memory allocation constraints */
+    if (size > PAGE_SIZE)
+        gfp_mask |= __GFP_NOWARN; /* Prevent kernel warnings for expected failures */
+
+    sg = kzalloc(size, gfp_mask);
+    return sg;
 }
 
 shannon_sg_list_t *shannon_sg_vzalloc(unsigned int nents)

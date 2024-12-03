@@ -111,7 +111,7 @@ const char *get_gendisk_name(shannon_gendisk_t *gd)
 	return ((struct gendisk *) gd)->disk_name;
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
 static struct lock_class_key shannon_bio_compl_lkclass;
 #endif
 
@@ -119,23 +119,22 @@ static struct lock_class_key shannon_bio_compl_lkclass;
 shannon_gendisk_t *shannon_alloc_disk(shannon_request_queue_t *rq, int minors)
 {
 	struct request_queue *queue = (struct request_queue *)rq;
-	struct gendisk *disk;
+	struct gendisk *disk = NULL;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
-	if (queue->queuedata) {
+	if (queue->queuedata && !shannon_use_iosched) {
 		debugs0("qd=0x%08x (disk)\n", queue->queuedata);
 		disk = queue->queuedata;
 		disk->queue->queuedata = disk->private_data;
 		debugs0("disk pd=0x%08x\n", disk->private_data);
-	} else {
+	} else if (shannon_use_iosched) { // also *disk_name != 'd'
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
-		if (shannon_use_iosched) // also *disk_name != 'd'
-			disk = blk_mq_alloc_disk_for_queue(queue, &shannon_bio_compl_lkclass);
-		else
+		disk = blk_mq_alloc_disk_for_queue(queue, &shannon_bio_compl_lkclass);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
+		disk = __alloc_disk_node(queue, NUMA_NO_NODE, &shannon_bio_compl_lkclass);
 #endif
-			disk = blk_alloc_disk(NUMA_NO_NODE);
 	}
 
-	debugs0("disk=0x%08x err=%d minors=%d q=0x%08x td=0x%08x dp=0x%08x.\n", disk, IS_ERR(disk), minors, disk->queue, disk->queue->td, queue->queuedata);
+	debugs0("disk=0x%08x err=%d minors=%d q=0x%08x td=0x%08x dp=0x%08x (0x%08x).\n", disk, IS_ERR(disk), minors, disk->queue, disk->queue->td, queue->queuedata, disk->queue->queuedata);
 	if (IS_ERR(disk))
 	{
 		SHN_BUG_ON(IS_ERR(disk));
@@ -171,8 +170,10 @@ int shannon_init_gendisk(shannon_gendisk_t *disk, char *name, int major, int min
 		gd->fops = &shannon_ops_ns;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
 	/* disable submit_bio for ioscheduler and non-ns mode */
-	else if (shannon_use_iosched)
+	if (shannon_use_iosched) {
 		shannon_ops.submit_bio = NULL;
+		debugs0("submit_bio=0x%08x\n", gd->fops->submit_bio);
+	}
 #endif
 
 	return 0;
@@ -660,6 +661,11 @@ int shannon_convert_bio(struct shannon_bio *sbio, shannon_bio_t *lbio, unsigned 
 		return -EINVAL;
 	}
 
+	if (!bio->bi_io_vec) {
+		debugs0("bio->bi_io_vec is NULL\n");
+		return -EINVAL;
+	}
+
 	sbio->bio_size = get_bi_size(lbio);
 
 	sbio->segments = shannon_bio_segments(lbio);
@@ -945,9 +951,9 @@ int shannon_make_request(shannon_request_queue_t *q, shannon_bio_t *bio)
 	unsigned int logicb_size = get_logicb_size(sdev);
 	unsigned int logicb_shift = get_logicb_shift(sdev);
 
-	if (!sdev || shannon_check_availability(sdev))
+	if (!sdev || shannon_check_availability(sdev) || !bio)
 	{
-		debugs0("ret einval\n");
+		debugs0("ret einval (bio=0x%08x)\n", bio);
 		shannon_bio_endio(bio, -EIO);
 		return 0;
 	}
@@ -984,6 +990,12 @@ int shannon_make_request(shannon_request_queue_t *q, shannon_bio_t *bio)
 	}
 
 	sbio = alloc_sbio(GFP_SHANNON);
+	if (!sbio)
+	{
+		debugs0("ret=-ENOMEM.\n");
+		shannon_bio_endio(bio, -ENOMEM);
+		return 0;
+	}
 	sbio->bio = bio;
 	sbio->lreq = NULL;
 #ifdef CONFIG_SHANNON_ATOMIC_WRITE_VERIFY
@@ -1051,6 +1063,8 @@ int shannon_make_request_ns(shannon_request_queue_t *q, shannon_bio_t *bio)
 	int ret;
 	unsigned int logicb_size = ns_get_logicb_size(ns);
 	unsigned int logicb_shift = ns_get_logicb_shift(ns);
+
+	debugs0("bio 0x%08x\n", bio);
 
 	increase_ns_pending_bios(ns);
 	if (shannon_check_availability_ns(ns)) {
