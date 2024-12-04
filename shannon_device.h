@@ -68,6 +68,7 @@ extern void shannon_end_io_acct(shannon_gendisk_t *gdt,
 				shannon_request_queue_t *queue,
 				shannon_bio_t *p,
 				unsigned long start_time);
+extern void shannon_update_io_ticks(struct block_device *part, unsigned long now);
 extern unsigned long shannon_read_sectors(shannon_gendisk_t *gdt);
 extern unsigned long shannon_write_sectors(shannon_gendisk_t *gdt);
 extern unsigned long shannon_read_ios(shannon_gendisk_t *gdt);

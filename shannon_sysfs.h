@@ -3,12 +3,6 @@
 
 #include "shannon_kcore.h"
 
-struct __shannon_kobject {
-	RESERVE_MEM(152);
-};
-
-typedef struct __shannon_kobject shannon_kobject_t;
-
 extern int shannon_sysfs_init(shannon_kobject_t *skobj);
 extern void shannon_sysfs_exit(shannon_kobject_t *skobj);
 extern int shannon_sysfs_link(shannon_kobject_t *skobj);
@@ -19,6 +13,7 @@ extern void shannon_hwmon_exit(shannon_pci_dev_t *pdev, shannon_device_t *hwmon_
 struct shannon_dev;
 //  functions below are implemented in shannon_sysfs_core.c
 extern struct shannon_dev * to_shannon_dev(shannon_kobject_t *skobj);
+extern struct kobject *to_sdev_kobj(shannon_kobject_t *skobj);
 extern void *to_sdev_misc(shannon_kobject_t *skobj);
 extern void *to_shannon_disk(shannon_kobject_t *skobj);
 extern shannon_kobject_t *to_shannon_pci_info_kobj(shannon_kobject_t *skobj);

@@ -54,7 +54,6 @@
 #define SHANNON_RHEL_RELEASE_OVER_8_4
 #endif
 #endif
-
 // SUSE
 #ifdef SUSE_PRODUCT_CODE
 #define SHANNON_ON_SUSE

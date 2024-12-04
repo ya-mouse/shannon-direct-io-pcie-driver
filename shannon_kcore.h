@@ -12,11 +12,14 @@
  * TODO: remove these header files, provide cross platform portabilty.
  */
 #include <linux/types.h>
+#include <linux/blkdev.h>
 #include <linux/gfp.h>
 #include <linux/errno.h>
 #include <linux/ioctl.h>
 #include <linux/highmem.h>
 #include <linux/topology.h>
+#include <linux/pci.h>
+#include <linux/pm_qos.h>
 #include "shannon_list.h"
 
 #define RESERVE_MEM(bytes) char mem[bytes] __attribute__ ((aligned(8)))
@@ -40,6 +43,12 @@ struct __shannon_rwlock {
 
 typedef struct __shannon_spinlock shannon_spinlock_t;
 typedef struct __shannon_rwlock shannon_rwlock_t;
+
+struct __shannon_wait_queue_head {
+	shannon_spinlock_t lock;
+	struct shannon_list_head task_list;
+};
+typedef struct __shannon_wait_queue_head shannon_wait_queue_head_t;
 
 #ifdef CONFIG_PROVE_LOCKING
 
@@ -106,7 +115,11 @@ extern void shannon_write_unlock_irq(shannon_rwlock_t *lock);
 extern int shannon_write_trylock(shannon_rwlock_t *lock);
 
 #endif
+extern unsigned long shannon_read_lock_irqsave(shannon_rwlock_t *lock);
+extern unsigned long shannon_write_lock_irqsave(shannon_rwlock_t *lock);
 extern unsigned long shannon_spin_lock_irqsave(shannon_spinlock_t *lock);
+extern void shannon_read_unlock_irqrestore(shannon_rwlock_t *lock, unsigned long flags);
+extern void shannon_write_unlock_irqrestore(shannon_rwlock_t *lock, unsigned long flags);
 extern void shannon_spin_unlock_irqrestore(shannon_spinlock_t *lock, unsigned long flags);
 //  @END of spinlock wrapper
 
@@ -133,6 +146,7 @@ typedef struct __shannon_semaphore shannon_mutex_t;
 #else
 
 extern void shannon_mutex_init(shannon_mutex_t *lock);
+extern void shannon_mutex_init2(shannon_mutex_t *lock);
 extern void shannon_mutex_lock(shannon_mutex_t *lock);
 extern void shannon_mutex_unlock(shannon_mutex_t *lock);
 extern int shannon_mutex_trylock(shannon_mutex_t *lock);
@@ -407,7 +421,66 @@ typedef void shannon_msix_entry_t;
 #define shannon_barrier()    barrier()
 #endif
 
-struct shannon_dev;
+struct __shannon_kobject {
+	RESERVE_MEM(152);
+};
+typedef struct __shannon_kobject shannon_kobject_t;
+
+struct shannon_dev {
+    unsigned char   _pad0[0xb2c];            // 0x0000
+    __u32          counter1;                 // 0x0b2c
+    __u32          counter2;                 // 0x0b30
+    unsigned char   _pad1[0x154];            // 0x0b34
+	shannon_atomic_t atomic_counter;         // 0x0c88
+	unsigned char   _pad1_1[0x1f18];         // 0x0c90
+	__u32          value_at_0x2ba8;          // 0x2ba8
+	unsigned char   _pad1_2[0x2c4];          // 0x0c8c
+    __u32          over_provision;           // 0x2e70
+    unsigned char   _pad2[0x20];             // 0x2e74
+    __u32          param1;                   // 0x2e94
+    unsigned char   _pad3[0x318];            // 0x2e98
+	__u32          value_at_0x31b0;          // 0x31b0
+	__u32          value_at_0x31b4;          // 0x31b4
+    __u32          minor;                    // 0x31b8
+    __u32          major;                    // 0x31bc
+    unsigned char   _pad4[0x110];            // 0x31c0
+    char           name[256];                // 0x32d0
+    unsigned char   _pad5[0x18];             // 0x33d0
+	__u32          value_at_0x33e8;          // 0x33e8
+    unsigned char   _pad5_1[0x244];          // 0x33ec
+    __u64          limit1;                   // 0x3630
+    unsigned char   _pad5_2[8];              // 0x3638
+    __u64          limit2;                   // 0x3640
+    unsigned char   _pad6[0x90d8];           // 0x3648
+    struct shannon_request_queue *queue;     // 0xc720
+    struct gendisk *disk;                    // 0xc728
+    unsigned char   _pad10[0xca8];           // 0xc730
+	__u32          value_at_0xd3d8;          // 0xd3d8
+    unsigned char   _pad10_1[4];             // 0xd3dc
+    char           disk_name[16];            // 0xd3e0
+	__u64   	   capacity;                 // 0xd3f0
+	unsigned char   _pad11[0xb8];            // 0xd3f8
+	__u32		   value_at_0xd4b0;          // 0xd4b0
+	unsigned char   _pad11_1[0x1dc];         // 0xd4b4
+	shannon_wait_queue_head_t wait_queue_head; // 0xd690
+	unsigned char   _pad11_2[0x344];         // 0xd720
+    __u32          logicb_shift;             // 0xda64
+    __u32          logicb_size;              // 0xda68
+    unsigned char   _pad7[0x8];              // 0xda6c
+    __u32          param4;                   // 0xda74
+    unsigned char   _pad8[0x20];             // 0xda78
+    __u32          param2;                   // 0xda98
+    unsigned char   _pad9[0x834];            // 0xda9c
+	shannon_kobject_t kobj;                  // 0xe2d0
+	unsigned char  _pad12[152];              // 0xe368
+    __u32          state;                    // 0xe400
+} __attribute__((packed));
+
+static_assert(offsetof(struct shannon_dev, value_at_0x2ba8) == 0x2ba8, "Wrong offset for 0xd69c");
+static_assert(offsetof(struct shannon_dev, kobj) == 0xe2d0, "Wrong offset for kobj");
+static_assert(offsetof(struct shannon_dev, _pad12) == 0xe368, "Wrong offset for kobj");
+static_assert(offsetof(struct shannon_dev, state) == 0xe400, "Wrong offset for state");
+
 struct shannon_disk;
 struct shannon_namespace;
 const char *get_cdev_name_safe(struct shannon_dev *sdev);

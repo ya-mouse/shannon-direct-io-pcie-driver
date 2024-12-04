@@ -23,12 +23,20 @@ void shannon_pci_set_master(shannon_pci_dev_t *dev)
 
 void * shannon_pci_alloc_consistent(shannon_pci_dev_t *hwdev, shannon_size_t size, shannon_dma_addr_t *dma_handle)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)
+	return dma_alloc_coherent(&((struct pci_dev *)hwdev)->dev, size, dma_handle, GFP_ATOMIC);
+#else
 	return pci_alloc_consistent((struct pci_dev *)hwdev, size, dma_handle);
+#endif
 }
 
 void shannon_pci_free_consistent(shannon_pci_dev_t *hwdev, shannon_size_t size, void *vaddr, shannon_dma_addr_t dma_handle)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)
+	dma_free_coherent(&((struct pci_dev *)hwdev)->dev, size, vaddr, dma_handle);
+#else
 	pci_free_consistent((struct pci_dev *)hwdev, size, vaddr, dma_handle);
+#endif
 }
 
 void shannon_pci_set_drvdata(shannon_pci_dev_t *pdev, void *data)
@@ -432,7 +440,13 @@ clear:
 static void shannon_pci_dev_d3_sleep(struct pci_dev *dev)
 {
 	unsigned int delay = 100;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 33)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
+/*
+ * Field rename:
+ *   https://lore.kernel.org/r/20200730210848.1578826-1-kw@linux.com
+ */
+	delay = dev->d3hot_delay;
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 33)
 	delay = dev->d3_delay;
 #endif
 	shannon_msleep(delay);
@@ -554,8 +568,12 @@ int shannon_pci_get_node(shannon_pci_dev_t *pdev)
 
 void get_pci_bus_info(shannon_pci_dev_t *pdev, struct shannon_pci_info *info)
 {
-	struct pci_dev *dev = ((struct pci_dev *)pdev);
-	get_pci_info((shannon_pci_dev_t *)dev->bus->self, info);
+    struct pci_dev *dev = ((struct pci_dev *)pdev);
+    if (dev->bus && dev->bus->self) {
+        get_pci_info((shannon_pci_dev_t *)dev->bus->self, info);
+    } else {
+        memset(info, 0, sizeof(*info));
+    }
 }
 
 int shannon_pci_bus_retrain(shannon_pci_dev_t *pdev)

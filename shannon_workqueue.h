@@ -27,6 +27,7 @@ extern int shannon_queue_delayed_work(shannon_workqueue_struct_t*wq, struct shan
 extern int shannon_schedule_delayed_work(struct shannon_delayed_work *work, unsigned long delay);
 extern int shannon_schedule_work(struct shannon_work_struct *work);
 extern void shannon_cancel_delayed_work(struct shannon_delayed_work *work);
+extern int __shannon_cancel_delayed_work(struct shannon_delayed_work *work);
 extern void shannon_work_clear_pending(struct shannon_work_struct *work);
 
 extern shannon_workqueue_struct_t *shannon_create_singlethread_workqueue(const char *name);
@@ -51,6 +52,7 @@ struct shannon_rt_work_struct {
 	struct shannon_list_head list;
 };
 
+extern int rt_thread_fn(void *data);
 extern void shannon_init_rt_work(struct shannon_rt_work_struct *work, shannon_rt_work_func_t func);
 extern int shannon_rt_queue_work(struct shannon_rt_workqueue_struct *rtwq, struct shannon_rt_work_struct *work);
 extern struct shannon_rt_workqueue_struct *shannon_create_singlethread_rt_workqueue(const char *name);

@@ -21,8 +21,26 @@ endif
 # Uncomment this to build EMU module directly in this dir.
 #SHANNON_FLAGS += -DCONFIG_SHANNON_EMU_MODULE
 
-.PHONY: all clean modules_clean modules modules_install uninstall
-all: modules
+.PHONY: all shipped clean modules_clean modules modules_install uninstall
+all: shipped modules
+
+SHIPPED_OBJS := $(wildcard *.o_shipped)
+TARGET_OBJS := $(SHIPPED_OBJS:.o_shipped=.o)
+
+KVER_MAJOR := $(shell echo $(KERNELVER) | cut -d. -f1)
+KVER_MINOR := $(shell echo $(KERNELVER) | cut -d. -f2)
+
+ifeq ($(shell test "$(KVER_MAJOR)" -ge 6 -o \( "$(KVER_MAJOR)" -eq 5 -a "$(KVER_MINOR)" -ge 15 \); echo $$?),0)
+OBJDUMP_REDEF := --redefine-sym printk=_printk
+endif
+
+shipped: $(TARGET_OBJS)
+
+%.o: %.o_shipped
+	objcopy $(OBJDUMP_REDEF) \
+		--weaken-symbol shannon_attach_sdev \
+		$< $@
+	truncate -s 0 .$@.cmd
 
 clean modules_clean:
 	$(MAKE) \

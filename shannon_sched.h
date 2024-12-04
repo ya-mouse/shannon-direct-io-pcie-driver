@@ -1,6 +1,7 @@
 #ifndef __SHANNON_SCHED_H
 #define __SHANNON_SCHED_H
 
+#include <linux/version.h>
 #include "shannon_kcore.h"
 
 #define	SHANNON_IRQ_NONE	    0
@@ -41,6 +42,12 @@ extern int shannon_interrupt(int irq, void *data);
 extern void shannon_disable_irq(unsigned int irq);
 extern void shannon_enable_irq(unsigned int irq);
 extern int shannon_request_irq(unsigned int irq, const char *devname, void *data);
+irqreturn_t shannon_interrupt_wrapper(int irq, void *data);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 19)
+irqreturn_t shannon_interrupt_wrapper(int irq, void *data, struct pt_regs *regs);
+#else
+irqreturn_t shannon_interrupt_wrapper(int irq, void *data);
+#endif
 
 extern void shannon_tasklet_schedule(struct shannon_tasklet_struct *t);
 extern void shannon_tasklet_init(struct shannon_tasklet_struct *t, void (*func)(unsigned long), unsigned long data);

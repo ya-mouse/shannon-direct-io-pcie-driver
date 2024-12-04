@@ -1,6 +1,7 @@
 #ifndef __SHANNON_SCSI_H
 #define __SHANNON_SCSI_H
 
+#include <scsi/scsi_host.h>
 #include "shannon_workqueue.h"
 
 #define SHANNON_SCSI_SENSE_LEN	32
@@ -131,6 +132,8 @@ struct shannon_scsi_private {
 	int scsi_host_no;
 };
 
+struct shannon_bio;
+
 extern int shannon_fill_from_dev_buffer(void *scsi_cmnd, unsigned char *arr, int arr_len);
 extern void shannon_build_sense_buffer(char *sbuff, int key, int asc, int asq);
 extern int shannon_attach_scsi(struct shannon_scsi_private *hostdata, void *data);
@@ -139,5 +142,9 @@ extern int shannon_scsi_disk_in_flight(struct shannon_scsi_private *hostdata);
 extern unsigned long shannon_scsi_sectors(struct shannon_scsi_private *hostdata, int write);
 extern unsigned long shannon_scsi_ios(struct shannon_scsi_private *hostdata, int write);
 extern unsigned long shannon_scsi_msecs(struct shannon_scsi_private *hostdata, int write);
+extern int shannon_convert_scsi_scmd(struct shannon_bio *sbio, int logicb_size);
+extern int shannon_scsi_probe(struct pci_dev *pdev, const struct pci_device_id *id);
+extern void shannon_scsi_remove(struct pci_dev *pdev);
+extern int shannon_scsi_queuecommand(struct Scsi_Host *shost, struct scsi_cmnd *cmd);
 
 #endif /* __SHANNON_SCSI_H */

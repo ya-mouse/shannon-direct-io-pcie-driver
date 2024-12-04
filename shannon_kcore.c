@@ -4,7 +4,6 @@
 #include <linux/bitops.h>
 #include <linux/bitmap.h>
 #include <linux/io.h>
-#include <linux/sched.h>
 #include <linux/mm.h>
 #include <asm/uaccess.h>
 #include <linux/slab.h>
@@ -16,6 +15,7 @@
 #include <linux/string.h>
 #include <linux/random.h>
 #include <linux/prefetch.h>
+#include <linux/printk.h>
 #include "shannon_port.h"
 #include "shannon_kcore.h"
 
@@ -917,6 +917,10 @@ int shannon_pm_qos_value = 1;
 int shannon_pm_qos_disable = 0;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0) ||	\
 	(defined(SHANNON_RHEL_RELEASE_OVER_8_3))
+/*
+ * Function being renamed from 5.7:
+ *   https://github.com/torvalds/linux/commit/67b06ba01857ed077e1a66bfa139156e7c68bab2
+ */
 #include <linux/pm_qos.h>
 int shannon_pm_qos_add_requirement(shannon_pm_qos_request_t *l, int qos, char *name, s32 value)
 {
@@ -1228,6 +1232,13 @@ void shannon_prefetchw(void *addr)
 {
 	prefetchw(addr);
 }
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+static inline void spin_lock_prefetch(const void *x)
+{
+	prefetchw(x);
+}
+#endif
 
 void shannon_spin_lock_prefetch(void *addr)
 {

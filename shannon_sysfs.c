@@ -5,12 +5,16 @@
 #include <linux/errno.h>
 #include <linux/module.h>
 #include <linux/version.h>
-#include <linux/genhd.h>
 #include <linux/miscdevice.h>
 #include <linux/pci.h>
 #include <linux/hwmon.h>
 #include <linux/hwmon-sysfs.h>
 #include "shannon_scsi.h"
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 7, 0)
+#include <linux/genhd.h>
+#else
+#include <linux/blkdev.h>
+#endif
 
 struct shannon_attr {
 	struct attribute attr;
@@ -148,7 +152,11 @@ define_one_ro(available_luns);
 define_one_ro(eblocks_in_lun);
 define_one_ro(pages_in_eblock);
 define_one_ro(nand_page_size);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+static struct shannon_attr _block_size = __ATTR_RO(block_size);
+#else
 define_one_ro(block_size);
+#endif
 define_one_ro(use_dual_head);
 define_one_ro(power_on_seconds);
 define_one_ro(power_cycle_count);
@@ -308,7 +316,11 @@ static struct attribute *shannon_default_attrs[] = {
 	&eblocks_in_lun.attr,
 	&pages_in_eblock.attr,
 	&nand_page_size.attr,
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+	&_block_size.attr,
+#else
 	&block_size.attr,
+#endif
 	&use_dual_head.attr,
 	&power_on_seconds.attr,
 	&power_cycle_count.attr,
@@ -420,6 +432,12 @@ static struct attribute *shannon_default_attrs[] = {
 	&lun_retiring_threshold.attr,
 	NULL,
 };
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
+/*
+ * https://github.com/torvalds/linux/commit/aa30f47cf666111f6bbfd15f290a27e8a7b9d854
+ */
+ATTRIBUTE_GROUPS(shannon_default);
+#endif
 
 static shannon_ssize_t pci_info_show(struct kobject *kobj, struct attribute *attr, char *buf)
 {
@@ -474,16 +492,27 @@ static struct attribute *pci_info_default_attrs[] = {
 	&linksta.attr,
 	NULL,
 };
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
+ATTRIBUTE_GROUPS(pci_info_default);
+#endif
 
 static struct kobj_type shannon_ktype = {
 	.sysfs_ops = &shannon_sysfs_ops,
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
+	.default_groups = shannon_default_groups,
+#else
 	.default_attrs = shannon_default_attrs,
+#endif
 	.release = shannon_sysfs_release,
 };
 
 static struct kobj_type pci_info_ktype = {
 	.sysfs_ops = &pci_info_sysfs_ops,
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
+	.default_groups = pci_info_default_groups,
+#else
 	.default_attrs = pci_info_default_attrs,
+#endif
 	.release = shannon_sysfs_release,
 };
 
@@ -548,8 +577,14 @@ void shannon_sysfs_exit(shannon_kobject_t *skobj)
 struct kobject *to_sdev_kobj(shannon_kobject_t *skobj)
 {
 	struct gendisk *disk = (struct gendisk *)to_shannon_disk(skobj);
+	debugs0("disk=0x%08x.\n", disk);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 28)
+	debugs0("dev=0x%08x.\n", disk_to_dev(disk));
+	if (disk_to_dev(disk))
+	{
+		debugs0("kobj=0x%08x.\n", disk_to_dev(disk)->kobj);
+	}
 	return &disk_to_dev(disk)->kobj;
 #else
 	return &disk->dev.kobj;
@@ -563,6 +598,7 @@ struct kobject *to_sdev_kobj(shannon_kobject_t *skobj)
 int shannon_sysfs_link(shannon_kobject_t *skobj)
 {
 	struct kobject *sdev_kobj = to_sdev_kobj(skobj);
+	debugs0("sdev_kobj=0x%08x skobj=0x%08x.\n", sdev_kobj, skobj);
 	return sysfs_create_link(sdev_kobj, (struct kobject *)skobj, "shannon");
 }
 
@@ -697,7 +733,7 @@ define_one_rw_ns(print_latency_interval);
 define_one_ro_ns(user_defined_name);
 define_one_rw_ns(discard_large_unit_threshold);
 
-static struct attribute *shannon_default_attrs_ns[] = {
+static struct attribute *shannon_default_ns_attrs[] = {
 	&host_write_sectors_ns.attr,
 	&host_read_sectors_ns.attr,
 	&valid_sectors_ns.attr,
@@ -711,10 +747,17 @@ static struct attribute *shannon_default_attrs_ns[] = {
 	&discard_large_unit_threshold_ns.attr,
 	NULL,
 };
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
+ATTRIBUTE_GROUPS(shannon_default_ns);
+#endif
 
 static struct kobj_type shannon_ktype_ns = {
 	.sysfs_ops = &shannon_sysfs_ops_ns,
-	.default_attrs = shannon_default_attrs_ns,
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
+	.default_groups = shannon_default_ns_groups,
+#else
+	.default_attrs = shannon_default_ns_attrs,
+#endif
 	.release = shannon_sysfs_release_ns,
 };
 
@@ -837,7 +880,7 @@ define_one_rw_pool(overprovision);
 define_one_rw_pool(hard_queue_limit);
 define_one_rw_pool(read_cmd_limit);
 
-static struct attribute *shannon_default_attrs_pool[] = {
+static struct attribute *shannon_default_pool_attrs[] = {
 	&used_space_percentage_pool.attr,
 	&physical_capacity_pool.attr,
 	&overprovision_pool.attr,
@@ -845,10 +888,17 @@ static struct attribute *shannon_default_attrs_pool[] = {
 	&read_cmd_limit_pool.attr,
 	NULL,
 };
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
+ATTRIBUTE_GROUPS(shannon_default_pool);
+#endif
 
 static struct kobj_type shannon_ktype_pool = {
 	.sysfs_ops = &shannon_sysfs_ops_pool,
-	.default_attrs = shannon_default_attrs_pool,
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
+	.default_groups = shannon_default_pool_groups,
+#else
+	.default_attrs = shannon_default_pool_attrs,
+#endif
 	.release = shannon_sysfs_release_pool,
 };
 
