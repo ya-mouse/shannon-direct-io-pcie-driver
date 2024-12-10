@@ -68,7 +68,11 @@ extern void shannon_end_io_acct(shannon_gendisk_t *gdt,
 				shannon_request_queue_t *queue,
 				shannon_bio_t *p,
 				unsigned long start_time);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
 extern void shannon_update_io_ticks(struct block_device *part, unsigned long now);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0) || defined(SHANNON_RHEL_RELEASE_OVER_8_0)
+extern void shannon_update_io_ticks(struct hd_struct *part, unsigned long now);
+#endif
 extern unsigned long shannon_read_sectors(shannon_gendisk_t *gdt);
 extern unsigned long shannon_write_sectors(shannon_gendisk_t *gdt);
 extern unsigned long shannon_read_ios(shannon_gendisk_t *gdt);

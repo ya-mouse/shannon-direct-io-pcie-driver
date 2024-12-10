@@ -152,7 +152,7 @@ define_one_ro(available_luns);
 define_one_ro(eblocks_in_lun);
 define_one_ro(pages_in_eblock);
 define_one_ro(nand_page_size);
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
 static struct shannon_attr _block_size = __ATTR_RO(block_size);
 #else
 define_one_ro(block_size);
@@ -316,7 +316,7 @@ static struct attribute *shannon_default_attrs[] = {
 	&eblocks_in_lun.attr,
 	&pages_in_eblock.attr,
 	&nand_page_size.attr,
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
 	&_block_size.attr,
 #else
 	&block_size.attr,
