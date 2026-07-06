@@ -6,3 +6,7 @@
 *.mod.c
 Module.symvers
 modules.order
+
+# python / opencode tooling artifacts
+__pycache__/
+*.pyc

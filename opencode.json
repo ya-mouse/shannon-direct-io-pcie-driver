@@ -1,0 +1,45 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "default_agent": "shannon-driver-dev",
+  "instructions": ["AGENTS.md"],
+  "skills": {
+    "paths": [".opencode/skills"]
+  },
+  "mcp": {
+    "shannon": {
+      "type": "local",
+      "command": ["python3", ".opencode/mcp/shannon-server.py"],
+      "enabled": true
+    }
+  },
+  "permission": {
+    "edit": "allow",
+    "bash": {
+      "*": "ask",
+      "ls *": "allow",
+      "cat *": "allow",
+      "git *": "allow",
+      "rg *": "allow",
+      "grep *": "allow",
+      "find *": "allow",
+      "ssh *": "allow",
+      "scp *": "allow",
+      "rsync *": "allow",
+      "docker *": "allow",
+      "make *": "ask",
+      "scripts/*": "allow",
+      "./scripts/*": "allow",
+      "sh scripts/*": "allow",
+      "sh ./scripts/*": "allow",
+      "bash scripts/*": "allow",
+      "bash ./scripts/*": "allow"
+    },
+    "external_directory": {
+      "*": "allow"
+    }
+  },
+  "tool_output": {
+    "max_lines": 400,
+    "max_bytes": 16384
+  }
+}
