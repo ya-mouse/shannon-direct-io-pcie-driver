@@ -8,7 +8,7 @@
   "mcp": {
     "shannon": {
       "type": "local",
-      "command": ["python3", ".opencode/mcp/shannon-server.py"],
+      "command": ["sh", "-c", "test -x ./.opencode/mcp/shannon-mcp || (cd ./.opencode/mcp-go && go build -o ../mcp/shannon-mcp .); exec ./.opencode/mcp/shannon-mcp"],
       "enabled": true
     }
   },

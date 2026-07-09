@@ -90,7 +90,7 @@ if [ "$list" -eq 1 ]; then
   exec "$script_dir/shannon-pci-list.sh" "$host" --pretty
 fi
 
-append="panic=5 init=/init console=ttyS0"
+append="panic=5 init=/init console=ttyS0 watchdog_thresh=60"
 gdbarg=
 if [ "$gdb" -eq 1 ]; then
   append="$append nokaslr"

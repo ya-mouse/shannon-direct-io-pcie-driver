@@ -2,6 +2,7 @@
 *.o.d
 *.cmd
 *.mod
+!go.mod
 *.ko
 *.mod.c
 Module.symvers
@@ -18,3 +19,6 @@ __pycache__/
 # local QEMU build backups
 qemu-backup/
 *.qemu-bundle.tar.gz
+
+# built Go MCP binary (source lives in .opencode/mcp-go/)
+.opencode/mcp/shannon-mcp
