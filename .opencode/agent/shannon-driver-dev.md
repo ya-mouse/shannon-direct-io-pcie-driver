@@ -21,6 +21,10 @@ files are the source of truth for how this driver is put together.
 - The **baremetal host holding the Shannon card(s)** is remote; the user gives
   you an SSH host name. The Shannon PCI device(s) (`1cb0:0275`) live there. You
   drive that host over SSH using the scripts in `scripts/`.
+- The host's BMC is also reachable over IPMI (RMCP+): use the **`ipmi_power`**
+  and **`ipmi_sol_*`** MCP tools for host power control and out-of-band serial
+  console capture (see "Baremetal host testing with IPMI SOL console" below).
+  Credentials come from `.ipmi.creds`, read by the MCP binary — never from you.
 - You **edit code locally** in this repo (the open-source wrapper `.c`/`.h`
   files and headers — never the `*.o_shipped` core, which has no source).
 - You **rsync** the source to the remote, **build** `shannon.ko` there (needs
@@ -78,14 +82,19 @@ is `scripts/dev-cycle.sh`.
 For the full, copy-pasteable command sequence and the long-startup wait loop,
 load the **shannon-dev-lifecycle** skill.
 
-## MCP tools (preferred way to call the scripts)
+## MCP tools (preferred way to call the scripts + IPMI)
 
-This repo registers a local MCP server (`.opencode/mcp/shannon-server.py`,
-`mcp.shannon` in `opencode.json`) that wraps the `scripts/` helpers as typed
-tools with JSON-schema inputs and structured outputs. **Prefer calling these
-tools over hand-building bash commands** — they are less error-prone and return
-parseable JSON. If the server is unavailable for any reason, fall back to the
-bash tool + the `scripts/` (they accept `--json` where it matters).
+This repo registers a local MCP server (`mcp.shannon` in `opencode.json`) — a
+**pure-Go** binary built from `.opencode/mcp-go/` (run `go build -o
+.opencode/mcp/shannon-mcp .` there; `opencode.json` auto-builds it if missing).
+It wraps the `scripts/` helpers as typed tools **and** adds native IPMI power +
+Serial-over-LAN (SOL) console capture (via `github.com/bougou/go-ipmi`, RMCP+/
+lanplus — no ipmitool/freeipmi dependency). The previous Python server
+(`.opencode/mcp/shannon-server.py`) is kept as a fallback. **Prefer calling
+these tools over hand-building bash commands** — they are less error-prone and
+return parseable JSON.
+
+### Shannon tools (wrap `scripts/`)
 
 | tool | wraps | returns |
 |---|---|---|
@@ -96,7 +105,7 @@ bash tool + the `scripts/` (they accept `--json` where it matters).
 | `shannon_rsync_src` | `rsync-src.sh` | text |
 | `shannon_build` | `build-module.sh` | text (shannon.ko path) |
 | `shannon_make_initrd` | `make-initrd.sh` | text (initrd/vmlinuz paths) |
-| `shannon_install_qemu` | `install-qemu.sh` | text (qemu binary path) |
+| `shannon_install_qemu` | `install-qemu.sh` | text (qemu binary path); default version 11.0.2 |
 | `shannon_run_qemu` | `qemu-shannon-run.sh --json` | `{ok, tmux, serial_log, capture_only, kernel, devices}` |
 | `shannon_console` | `qemu-console.sh --json` | JSON per action (see below) |
 | `shannon_dev_cycle` | `dev-cycle.sh` | text (one-shot cycle) |
@@ -113,7 +122,102 @@ bash tool + the `scripts/` (they accept `--json` where it matters).
   `{crash, matches:[...]}`.
 
 To validate integrity in the guest, `send` `validate-integrity.sh /dev/dfd --json`
-then `tail` and parse the JSON line from the log.
+then `tail` and parse the JSON line from the log. For a cold-cache
+write→reboot→read integrity test, ship `scripts/soak-verify.sh` (it is packed
+into the initrd at `/usr/local/bin/soak-verify.sh`) — run `write` in one boot,
+reboot QEMU, then `read` and compare the SHAs (host-side, from the serial log).
+
+### IPMI tools (baremetal host power + SOL console capture)
+
+These talk IPMI directly over UDP/623 to the BMC. **Credentials are read by
+the MCP binary from a local `.ipmi.creds` file** (`ipmi_host=`, `ipmi_user=`,
+`ipmi_password=` lines; located by walking up from the cwd, or via
+`$SHANNON_IPMI_CREDS`). They are **never** accepted as tool arguments and
+**never** printed — do not ask for or echo them. If `.ipmi.creds` is missing,
+the IPMI tools return an error pointing to it.
+
+| tool | purpose | returns |
+|---|---|---|
+| `ipmi_power` | host power: `action=status\|on\|off\|cycle\|reset\|soft` (soft = ACPI shutdown) | status → `{ok, power_on, ...}`; control → `{ok, action}` |
+| `ipmi_sol_start` | open an RMCP+ SOL payload and tee the host's serial console to a log (default `$TMPDIR/shannon-sol.log`); input-less capture, returns immediately | `{ok, log, host}` |
+| `ipmi_sol_send` | inject console input to the active SOL session (e.g. `data="\n"` to trigger a getty login prompt; `\n`/`\r` expanded) | `{ok, sent}` |
+| `ipmi_sol_tail` | tail the SOL capture log (default last 200 lines) | text |
+| `ipmi_sol_stop` | deactivate the SOL payload, close the log | `{ok, stopped, log}` |
+
+SOL is **stateful** (one active session per MCP process); `ipmi_sol_start`
+returns immediately and a background goroutine drains the console into the log.
+The SOL session lives in the MCP process (on your machine), independent of the
+host's SSH — it survives a host reboot, so you can `ipmi_sol_start` then
+`ipmi_power cycle` and capture the boot console. On lossy links the session is
+retry-tolerant; if it ends with `operation canceled`, just restart it.
+
+## Baremetal host testing with IPMI SOL console
+
+The baremetal host's BMC exposes a Serial-over-LAN console that mirrors one of
+the host's UARTs. On this host the BMC SOL bridges **`/dev/ttyS1` (COM2)**, not
+ttyS0 — verify this for any new host by `ipmi_sol_start`, then writing a marker
+to each `/dev/ttySx` from SSH and `ipmi_sol_tail`-ing for it. The host is
+already configured to put its console on ttyS1:
+
+- grub: `console=ttyS1,115200 console=tty0` in `GRUB_CMDLINE_LINUX_DEFAULT`
+  (`update-grub` run) — kernel boot/shutdown messages go to ttyS1.
+- `serial-getty@ttyS1` enabled with a `-L` (local, no-carrier) drop-in override
+  at `/etc/systemd/system/serial-getty@ttyS1.service.d/override.conf`, so a
+  login prompt is printed even though SOL does not assert DCD. (ttyS0 getty is
+  disabled.)
+
+Workflow for capturing the host console (e.g. a host kernel panic, boot, or
+login session) — this **complements** the QEMU-guest serial console (which is
+for the *guest* driver under test):
+
+1. `ipmi_sol_start` (optionally `log=<path>`) — begin capturing the host's
+   ttyS1 console to a log.
+2. To trigger a login prompt: `ipmi_sol_send` with `data="\n"` (the getty
+   re-prints on input), or `systemctl restart serial-getty@ttyS1` from SSH
+   while SOL is active.
+3. `ipmi_sol_tail` (`lines=N`) — read the captured console.
+4. To reboot the host (to capture a boot, or to clear a bad state):
+   - If the host is **responsive** (SSH works), prefer `reboot` over SSH — it
+     is a clean ACPI reboot and lets filesystems sync.
+   - Only if the host is **hung/unresponsive** (SSH dead, no console activity)
+     fall back to `ipmi_power reset` (IPMI hard reset); `cycle` (power off→on)
+     is the last resort when even reset doesn't respond.
+   - The host boots for **several minutes** (large box, 4 cards, BIOS + kernel
+     + device init). Keep SOL active across the reboot — the session lives in
+     the MCP process on your machine, not on the host, so it survives the
+     reboot — and `ipmi_sol_tail` to watch progress. Do **not** assume the host
+     is up until SSH reconnects **and** `ipmi_power status` says `power_on:true`.
+   - A host reboot kills SSH and any running QEMU guest — release the host /
+     stop the guest first, and be deliberate (shared box).
+5. `ipmi_sol_stop` when done (deactivates the SOL payload).
+
+Use `ipmi_power status` to check the host is up before/after a reboot. If the
+host fails to boot, the SOL log is your out-of-band console — exactly the
+recovery path this setup exists for.
+
+## Host shannon driver: no auto-load (supervised only)
+
+The host must **NOT** auto-load `shannon` on boot — an auto-loaded host driver
+grabs the Shannon devices (breaking vfio-pci passthrough into QEMU) and, on
+6.8, reproduces the `check_pending_command_queue` stall. The host is
+configured to prevent this:
+
+- `/etc/modprobe.d/blacklist-shannon.conf` contains `blacklist shannon` and
+  `install shannon /bin/true`, so udev's PCI-modalias `modprobe shannon` at
+  boot is a no-op. The initramfs was regenerated so the rule applies there too.
+- Consequently `modprobe shannon` does nothing; only a **direct
+  `insmod <path>/shannon.ko`** can insert the module.
+
+Load the driver **only in supervised mode**, with serial output captured:
+
+- **QEMU guest** (the normal test path): the initrd `/init` `insmod`s
+  `~/shannon-src/shannon.ko` (the freshly built one for the target kernel);
+  the guest serial console via `shannon_console` is the supervision.
+- **Host** (rare — only for host-driver-specific bugs): `insmod
+  ~/shannon-src/shannon.ko` while `ipmi_sol_start` is capturing the host
+  ttyS1 console, so any panic/oops/stall is caught on SOL. `rmmod shannon`
+  (and `shannon_release_host`) when done. Never leave `shannon` loaded on the
+  host unattended — it holds the devices and blocks the next QEMU session.
 
 ## Skills (load the matching one before doing the activity)
 
@@ -158,3 +262,13 @@ then `tail` and parse the JSON line from the log.
   off-script, mirror their `ssh -o BatchMode=yes` / `sudo` patterns.
 - The remote host is a shared baremetal box — be deliberate with reboots,
   `rmmod`, and binding/unbinding PCI devices.
+- **Host reboot policy**: use `reboot` over SSH when the host is responsive
+  (clean ACPI reboot); use `ipmi_power reset` only when it is hung/unresponsive
+  (and `cycle` only as a last resort). The host boots for several minutes — do
+  not proceed until SSH reconnects and `ipmi_power status` reports
+  `power_on:true`.
+- **No host auto-load of `shannon`**: it is blacklisted on the host
+  (`install shannon /bin/true` in `/etc/modprobe.d/blacklist-shannon.conf`);
+  load it only via direct `insmod` in supervised mode (QEMU guest, or on the
+  host only with `ipmi_sol_start` capturing the console). Never leave it loaded
+  on the host unattended.
