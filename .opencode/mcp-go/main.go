@@ -611,14 +611,15 @@ func tIPMIPower(a map[string]any) (string, bool) {
 // ---------------------------------------------------------------------------
 
 type solSession struct {
-	cancel  context.CancelFunc
-	logPath string
-	done    chan struct{}
+	cancel   context.CancelFunc
+	logPath  string
+	done     chan struct{}
+	inWriter io.Writer // pipe write end for sending console input (nil if none)
 }
 
 var (
-	solMu   sync.Mutex
-	solCur  *solSession
+	solMu  sync.Mutex
+	solCur *solSession
 )
 
 func defaultSOLLog() string {
@@ -655,10 +656,18 @@ func tIPMISolStart(a map[string]any) (string, bool) {
 		return err.Error(), true
 	}
 	client.WithInterface(ipmi.InterfaceLanplus)
+	// SOL does sustained polling; be tolerant of a lossy Mac->BMC VPN link.
+	client.WithRetry(12)
+	client.WithTimeout(6 * time.Second)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	sess := &solSession{cancel: cancel, logPath: logPath, done: done}
+	// Blocking, no-input reader by default: a pipe whose write end is kept open
+	// blocks SOLActivate's input loop so it stays idle while the poll ticker
+	// drains inbound bytes into the log. ipmi_sol_send writes to pw to inject
+	// console input (e.g. a newline to trigger a getty login prompt).
+	pr, pw := io.Pipe()
+	sess := &solSession{cancel: cancel, logPath: logPath, done: done, inWriter: pw}
 
 	solMu.Lock()
 	solCur = sess
@@ -668,11 +677,6 @@ func tIPMISolStart(a map[string]any) (string, bool) {
 		defer close(done)
 		defer f.Close()
 		defer func() { _ = client.Close(context.Background()) }()
-		// Blocking, no-input reader: the SOL session captures inbound serial
-		// data only (we never send console input). A pipe whose write end is
-		// kept open blocks ReadByte forever, so SOLActivate's input loop stays
-		// idle while the poll ticker drains inbound bytes into the log.
-		pr, pw := io.Pipe()
 		defer pw.Close()
 		fmt.Fprintf(f, "[SOL capture started -> %s at %s]\n", creds.Host, time.Now().Format(time.RFC3339))
 		if cerr := client.Connect(ctx); cerr != nil {
@@ -680,7 +684,7 @@ func tIPMISolStart(a map[string]any) (string, bool) {
 			return
 		}
 		if serr := client.SOLActivate(ctx, pr, f, &ipmi.SOLActivateOptions{
-			PollInterval: 200 * time.Millisecond,
+			PollInterval: 1000 * time.Millisecond,
 		}); serr != nil {
 			fmt.Fprintf(f, "[SOL session ended: %v]\n", serr)
 		}
@@ -705,6 +709,26 @@ func tIPMISolStop(a map[string]any) (string, bool) {
 	case <-time.After(15 * time.Second):
 	}
 	out, _ := json.Marshal(map[string]any{"ok": true, "stopped": true, "log": sess.logPath})
+	return string(out), false
+}
+
+func tIPMISolSend(a map[string]any) (string, bool) {
+	s := gstr(a, "data")
+	if s == "" {
+		s = "\n"
+	}
+	s = strings.ReplaceAll(s, "\\n", "\n")
+	s = strings.ReplaceAll(s, "\\r", "\r")
+	solMu.Lock()
+	sess := solCur
+	solMu.Unlock()
+	if sess == nil || sess.inWriter == nil {
+		return "no active SOL session", true
+	}
+	if _, err := sess.inWriter.Write([]byte(s)); err != nil {
+		return "write to SOL failed: " + err.Error(), true
+	}
+	out, _ := json.Marshal(map[string]any{"ok": true, "sent": len(s)})
 	return string(out), false
 }
 
@@ -754,7 +778,8 @@ func registerTools() {
 
 		// ---- IPMI (creds read from .ipmi.creds by the binary; never passed by the agent) ----
 		{Name: "ipmi_power", Description: "Control or query the baremetal host power via IPMI (RMCP+/lanplus, pure-Go). action: status (default) | on | off | cycle | reset | soft (ACPI soft shutdown). Credentials are read from .ipmi.creds by the server; do NOT pass them. Returns JSON {ok, power_on,...} or {ok, action}.", InputSchema: schema(map[string]any{"action": enumStr("status", "on", "off", "cycle", "reset", "soft")}), h: tIPMIPower},
-		{Name: "ipmi_sol_start", Description: "Start an IPMI Serial-over-LAN (SOL) capture session: opens an RMCP+ SOL payload and tees the host's serial console output to a log file (default $TMPDIR/shannon-sol.log). Returns immediately with {ok, log, host}. The host's grub/console must be redirected to the serial port for SOL to capture boot/kernel output. Capture is input-less (read-only). Stop with ipmi_sol_stop.", InputSchema: schema(map[string]any{"log": str()}), h: tIPMISolStart},
+		{Name: "ipmi_sol_start", Description: "Start an IPMI Serial-over-LAN (SOL) capture session: opens an RMCP+ SOL payload and tees the host's serial console output to a log file (default $TMPDIR/shannon-sol.log). Returns immediately with {ok, log, host}. The host's grub/console must be redirected to the serial port for SOL to capture boot/kernel output. Capture is input-less (read-only); use ipmi_sol_send to inject console input (e.g. a newline to trigger a getty prompt). Stop with ipmi_sol_stop.", InputSchema: schema(map[string]any{"log": str()}), h: tIPMISolStart},
+		{Name: "ipmi_sol_send", Description: "Send a string to the active IPMI SOL console (console input). Use data='\\n' (default) to send a newline, e.g. to trigger a getty login prompt on the host's ttyS0. \\n and \\r escapes are expanded.", InputSchema: schema(map[string]any{"data": str()}), h: tIPMISolSend},
 		{Name: "ipmi_sol_stop", Description: "Stop the active IPMI SOL capture session (deactivates the SOL payload, closes the log). Returns {ok, stopped, log}.", InputSchema: schema(map[string]any{}), h: tIPMISolStop},
 		{Name: "ipmi_sol_tail", Description: "Tail the IPMI SOL capture log (default last 200 lines). Optional 'lines' and 'log' (defaults to the active session's log).", InputSchema: schema(map[string]any{"lines": intl(), "log": str()}), h: tIPMISolTail},
 	}
