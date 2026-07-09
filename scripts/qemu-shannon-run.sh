@@ -34,6 +34,10 @@
 #   --all | <bdf...>   which devices to pass through (0000:87:00.0 or 87:00.0)
 set -eu
 
+# Portable in-place sed: sedi FILE EXPR...  (BSD sed -i and GNU sed -i differ
+# in how the backup-extension argument is consumed; avoid -i entirely).
+sedi() { _sf=$1; shift; sed "$@" "$_sf" > "$_sf.sedi.$$" && mv "$_sf.sedi.$$" "$_sf"; }
+
 host=
 kver=6.8.0-48-generic
 qemu_dir='$HOME/shannon-qemu'
@@ -176,7 +180,7 @@ exec __QEMU_BIN__ -m __MEM__ -smp __SMP__ \
   __SERIAL__ __GDB____VFIO__
 QEMU
 
-sed -i \
+sedi "$run_tmp" \
   -e "s|__QEMU_DIR__|$qdr|" \
   -e "s|__QEMU_BIN__|$qemu_bin|" \
   -e "s|__MEM__|$memory|" \
@@ -186,8 +190,7 @@ sed -i \
   -e "s|__APPEND__|$append|" \
   -e "s|__SERIAL__|$serial_args|" \
   -e "s|__GDB__|$gdbarg|" \
-  -e "s|__VFIO__|$vfio|" \
-  "$run_tmp"
+  -e "s|__VFIO__|$vfio|"
 
 # Ship the run script to the remote qemu dir.
 ssh -o BatchMode=yes "$host" "mkdir -p '$qdr'"

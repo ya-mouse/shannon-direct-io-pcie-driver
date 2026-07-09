@@ -19,6 +19,10 @@
 # --mirror / --security-mirror: override archive.ubuntu.com / security.ubuntu.com.
 set -eu
 
+# Portable in-place sed: sedi FILE EXPR...  (BSD sed -i and GNU sed -i differ
+# in how the backup-extension argument is consumed; avoid -i entirely).
+sedi() { _sf=$1; shift; sed "$@" "$_sf" > "$_sf.sedi.$$" && mv "$_sf.sedi.$$" "$_sf"; }
+
 host=
 kver=
 suite=
@@ -52,6 +56,8 @@ done
 # Auto-detect suite(s) from the kernel version.
 if [ -z "$suite" ]; then
   case "$kver" in
+    7.*)   suite="noble" ;;           # noble HWE-7.0
+    6.17*) suite="noble" ;;           # noble HWE-6.17
     6.14*) suite="plucky" ;;
     6.11*) suite="oracular" ;;
     6.8*)  suite="noble jammy" ;;     # noble primary; jammy hwe-6.8 fallback
@@ -144,7 +150,7 @@ fetch_deb() {
 if [ "$NEED_IMAGE" -eq 1 ] && ! have_image; then
   echo '==> fetching kernel image for '"$KVER"
   ok=0
-  for p in "linux-image-unsigned-$KVER-generic" "linux-image-$KVER-generic"; do
+  for p in "linux-image-unsigned-$KVER" "linux-image-$KVER"; do
     fetch_deb "$p" || continue
     deb=$(ls -1 "$STAGE"/${p}_*.deb 2>/dev/null | head -1)
     [ -n "$deb" ] || continue
@@ -185,7 +191,7 @@ echo '==> kernel '"$KVER"' ready:'
 [ -d "/lib/modules/$KVER/build" ] && echo "  headers: /lib/modules/$KVER/build"
 REMOTE
 
-sed -i \
+sedi "$rs" \
   -e "s|__KVER__|$kver|g" \
   -e "s|__SUITES__|$suite|g" \
   -e "s|__ARCH__|$arch|g" \
@@ -193,8 +199,7 @@ sed -i \
   -e "s|__MIRROR__|$mirror|g" \
   -e "s|__SEC_MIRROR__|$sec_mirror|g" \
   -e "s|__NEED_IMAGE__|$need_image|g" \
-  -e "s|__NEED_HEADERS__|$need_headers|g" \
-  "$rs"
+  -e "s|__NEED_HEADERS__|$need_headers|g"
 
 scp -q "$rs" "$host:/tmp/.fetch-kernel.sh"
 rm -f "$rs"

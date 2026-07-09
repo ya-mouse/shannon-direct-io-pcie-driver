@@ -16,6 +16,10 @@
 #   release-host.sh --host HOST [--tmux shannon] [--all | <bdf...>] [--reset] [--no-kill-qemu] [--json]
 set -eu
 
+# Portable in-place sed: sedi FILE EXPR...  (BSD sed -i and GNU sed -i differ
+# in how the backup-extension argument is consumed; avoid -i entirely).
+sedi() { _sf=$1; shift; sed "$@" "$_sf" > "$_sf.sedi.$$" && mv "$_sf.sedi.$$" "$_sf"; }
+
 host=
 tmux=shannon
 devs=
@@ -148,13 +152,12 @@ else
 fi
 REMOTE
 
-sed -i \
+sedi "$rs" \
   -e "s|__JSON__|$json|" \
   -e "s|__TMUX__|$tmux|" \
   -e "s|__KILL_QEMU__|$kill_qemu|" \
   -e "s|__RESET__|$reset|" \
-  -e "s|__DEVLIST__|$devs|" \
-  "$rs"
+  -e "s|__DEVLIST__|$devs|"
 
 scp -q "$rs" "$host:/tmp/.release-host.sh"
 rm -f "$rs"

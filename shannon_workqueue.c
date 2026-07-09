@@ -123,7 +123,11 @@ int __shannon_cancel_delayed_work(struct shannon_delayed_work *work)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 15, 0)
 	int ret;
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0)
+	ret = timer_delete(&((struct delayed_work *)work)->timer);
+#else
 	ret = del_timer(&((struct delayed_work *)work)->timer);
+#endif
 	if (ret)
 		shannon_work_clear_pending((struct shannon_work_struct *)(&((struct delayed_work *)work)->work));
 	return ret;

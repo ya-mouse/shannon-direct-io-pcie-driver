@@ -10,3 +10,11 @@ modules.order
 # python / opencode tooling artifacts
 __pycache__/
 *.pyc
+
+# local-only IPMI credentials (NEVER commit) and editor config
+.ipmi.creds
+.vscode/
+
+# local QEMU build backups
+qemu-backup/
+*.qemu-bundle.tar.gz

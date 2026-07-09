@@ -17,6 +17,11 @@ void shannon_init_timer(shannon_timer_list *timer)
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 15, 0)
 	init_timer((struct timer_list *)timer);
 	((struct timer_list *)timer)->function = NULL;
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0)
+	/* 6.15: __init_timer() was removed from the public timer API; use
+	 * timer_setup() with a NULL callback (set later by
+	 * shannon_set_timer_context). */
+	timer_setup((struct timer_list *)timer, NULL, 0);
 #else
 	__init_timer((struct timer_list *)timer, NULL, 0);
 #endif
@@ -30,12 +35,20 @@ void shannon_add_timer(shannon_timer_list *timer, unsigned long expires)
 
 int shannon_del_timer_sync(shannon_timer_list *timer)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0)
+	return timer_delete_sync((struct timer_list *)timer);
+#else
 	return del_timer_sync((struct timer_list *)timer);
+#endif
 }
 
 int shannon_del_timer(shannon_timer_list *timer)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0)
+	return timer_delete((struct timer_list *)timer);
+#else
 	return del_timer((struct timer_list *)timer);
+#endif
 }
 
 int shannon_mod_timer(shannon_timer_list *timer, unsigned long expires)

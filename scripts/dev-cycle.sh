@@ -18,6 +18,7 @@ devs=
 gdb=0
 tmux=shannon
 release=1
+qemu_bin=
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -25,6 +26,7 @@ while [ $# -gt 0 ]; do
     --kernel) shift; kver="$1" ;;
     --all|--auto) devs=ALL ;;
     --gdb) gdb=1 ;;
+    --qemu) shift; qemu_bin="$1" ;;
     --tmux) shift; tmux="$1" ;;
     --release) release=1 ;;
     --no-release) release=0 ;;
@@ -67,8 +69,10 @@ echo "==> [5/6] bind shannon device(s) to vfio-pci"
 echo "==> [6/6] boot QEMU in tmux '$tmux'"
 gdb_flag=
 [ "$gdb" -eq 1 ] && gdb_flag=--gdb
+qemu_flag=
+[ -n "$qemu_bin" ] && qemu_flag="--qemu $qemu_bin"
 "$script_dir/qemu-shannon-run.sh" --host "$host" --kernel "$kver" --tmux "$tmux" \
-  $gdb_flag $([ "$devs" = "ALL" ] && echo --all || echo "$devs")
+  $gdb_flag $qemu_flag $([ "$devs" = "ALL" ] && echo --all || echo "$devs")
 
 cat <<EOF
 

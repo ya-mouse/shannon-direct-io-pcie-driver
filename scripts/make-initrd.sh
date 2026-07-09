@@ -15,6 +15,10 @@
 #   fast debug bring-up.
 set -eu
 
+# Portable in-place sed: sedi FILE EXPR...  (BSD sed -i and GNU sed -i differ
+# in how the backup-extension argument is consumed; avoid -i entirely).
+sedi() { _sf=$1; shift; sed "$@" "$_sf" > "$_sf.sedi.$$" && mv "$_sf.sedi.$$" "$_sf"; }
+
 host=
 kver=
 src='$HOME/shannon-src'
@@ -75,7 +79,8 @@ hostname shannon-test
 [ -e /dev/console ] || mknod /dev/console c 5 1
 [ -e /dev/null ]    || mknod /dev/null c 1 3
 echo '==> loading shannon driver (device init takes 5+ minutes; wait for Probed)'
-ko=$(find /lib/modules -name shannon.ko 2>/dev/null | head -1)
+ko=$(find /lib/modules/$(uname -r) -name shannon.ko 2>/dev/null | head -1)
+[ -z "$ko" ] && ko=$(find /lib/modules -name shannon.ko 2>/dev/null | head -1)
 if [ -n "$ko" ]; then
 	insmod "$ko" __MODPARAMS__
 else
@@ -83,7 +88,7 @@ else
 fi
 exec /bin/sh -c 'exec /bin/sh </dev/console >/dev/console 2>&1'
 INIT
-sed -i "s|__MODPARAMS__|$modparams|" "$init_tmp"
+sedi "$init_tmp" "s|__MODPARAMS__|$modparams|"
 scp -q "$init_tmp" "$host:/tmp/.shannon-init"
 rm -f "$init_tmp"
 
@@ -129,7 +134,9 @@ if [ ! -x "$root/bin/busybox" ]; then
   printf 'root:x:0:\n'                   > "$root/etc/group"
 fi
 
-# Place shannon.ko.
+# Place shannon.ko. Remove any stale shannon.ko left from a previous
+# (different-kver) initrd build so /init does not pick the wrong one.
+find "$root/lib/modules" -name shannon.ko -delete 2>/dev/null || true
 mkdir -p "$root/lib/modules/$KVER/kernel/drivers/block"
 cp "$SRC/shannon.ko" "$root/lib/modules/$KVER/kernel/drivers/block/shannon.ko"
 
@@ -138,12 +145,14 @@ cp /tmp/.shannon-init "$root/init"
 chmod +x "$root/init"
 rm -f /tmp/.shannon-init
 
-# Ship the integrity validator too, if the source tree has it.
-if [ -f "$SRC/scripts/validate-integrity.sh" ]; then
-  mkdir -p "$root/usr/local/bin"
-  cp "$SRC/scripts/validate-integrity.sh" "$root/usr/local/bin/validate-integrity.sh"
-  chmod +x "$root/usr/local/bin/validate-integrity.sh"
-fi
+# Ship the integrity validator + soak test too, if the source tree has them.
+mkdir -p "$root/usr/local/bin"
+for s in validate-integrity.sh soak-verify.sh; do
+  if [ -f "$SRC/scripts/$s" ]; then
+    cp "$SRC/scripts/$s" "$root/usr/local/bin/$s"
+    chmod +x "$root/usr/local/bin/$s"
+  fi
+done
 
 # Ensure vmlinuz is present (fetch-kernel.sh should have placed it; /boot backstop).
 if [ ! -f "$QEMU_DIR/vmlinuz-$KVER" ]; then
@@ -161,12 +170,11 @@ fi
 ls -l "$QEMU_DIR/initrd.img" "$QEMU_DIR/vmlinuz-$KVER"
 REMOTE
 
-sed -i \
+sedi "$rs" \
   -e "s|__QEMU_DIR__|$qdr|g" \
   -e "s|__KVER__|$kver|g" \
   -e "s|__SRC__|$srd|g" \
-  -e "s|__TPL__|$tpl|g" \
-  "$rs"
+  -e "s|__TPL__|$tpl|g"
 
 scp -q "$rs" "$host:/tmp/.make-initrd.sh"
 rm -f "$rs"

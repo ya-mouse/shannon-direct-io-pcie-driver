@@ -234,8 +234,15 @@ void shannon_blk_queue_block_size(shannon_request_queue_t *queue, unsigned int l
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 31)
 	debugs0("queue=0x%08x logical_size=%d physical_size=%d\n", queue, logical_size, physical_size);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 9, 0)
+	/* 6.9: the blk_queue_* setters were removed (queue_* are getters now);
+	 * set the queue_limits fields directly, as the old inlines did. */
+	((struct request_queue *)queue)->limits.logical_block_size = logical_size;
+	((struct request_queue *)queue)->limits.physical_block_size = physical_size;
+#else
 	blk_queue_logical_block_size((struct request_queue *)queue, logical_size);
 	blk_queue_physical_block_size((struct request_queue *)queue, physical_size);
+#endif
 
 #else
 
@@ -247,7 +254,9 @@ void shannon_blk_queue_block_size(shannon_request_queue_t *queue, unsigned int l
 void shannon_blk_queue_max_hw_sectors(shannon_request_queue_t *q, unsigned int max_hw_sectors)
 {
 	debugs0("q=0x%08x max_hw_sectors=%d\n", q, max_hw_sectors);
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 31)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 9, 0)
+	((struct request_queue *)q)->limits.max_hw_sectors = max_hw_sectors;
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 31)
 	blk_queue_max_hw_sectors((struct request_queue *)q, max_hw_sectors);
 #else
 	blk_queue_max_sectors((struct request_queue *)q, max_hw_sectors);
@@ -256,14 +265,18 @@ void shannon_blk_queue_max_hw_sectors(shannon_request_queue_t *q, unsigned int m
 
 void shannon_blk_queue_io_min(shannon_request_queue_t *queue, unsigned int min)
 {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 29)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 9, 0)
+	((struct request_queue *)queue)->limits.io_min = min;
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 29)
 	blk_queue_io_min((struct request_queue *)queue, min);
 #endif
 }
 
 void shannon_blk_queue_io_opt(shannon_request_queue_t *queue, unsigned int opt)
 {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 29)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 9, 0)
+	((struct request_queue *)queue)->limits.io_opt = opt;
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 29)
 	blk_queue_io_opt((struct request_queue *)queue, opt);
 #endif
 }
@@ -318,7 +331,18 @@ void shannon_queue_flag_clear(int flag, shannon_request_queue_t *queue)
 #endif
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 9, 0)
+void shannon_trim_setting(shannon_request_queue_t *queue)
+{
+	struct request_queue *rq = (struct request_queue *)queue;
+	/* 6.9: blk_queue_max_discard_sectors / blk_queue_max_write_zeroes_sectors
+	 * were removed (bdev_max_discard_sectors is a getter); set the
+	 * queue_limits fields directly, as the old inlines did. */
+	rq->limits.discard_granularity = PAGE_SIZE;
+	rq->limits.max_discard_sectors = (UINT_MAX >> 9) & ~7;
+	rq->limits.max_write_zeroes_sectors = (UINT_MAX >> 9) & ~7;
+}
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
 void shannon_trim_setting(shannon_request_queue_t *queue)
 {
 	struct request_queue *rq = (struct request_queue *)queue;
@@ -361,7 +385,10 @@ void shannon_trim_setting(shannon_request_queue_t *queue)
 void shannon_rotational_setting(shannon_request_queue_t *queue)
 {
 	debugs0("queue=0x%08x\n", queue);
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 28)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 9, 0)
+	/* 6.9: QUEUE_FLAG_NONROT was removed; non-rotational is the default for
+	 * bio-based/blk-mq queues, so there is nothing to set here. */
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 28)
 	shannon_queue_flag_set(QUEUE_FLAG_NONROT, queue);
 #endif
 }
@@ -1713,8 +1740,14 @@ int shannon_blk_mq_init_tag_set(struct blk_mq_tag_set *tag_set)
 	tag_set->nr_hw_queues = 1;
 	tag_set->queue_depth = 128;
 	tag_set->numa_node = NUMA_NO_NODE;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 9, 0)
+	/* 6.9: BLK_MQ_F_SHOULD_MERGE was removed (merging is the default now)
+	 * and BLK_MQ_F_NO_SCHED was renamed to BLK_MQ_F_NO_SCHED_BY_DEFAULT. */
+	tag_set->flags = BLK_MQ_F_NO_SCHED_BY_DEFAULT;
+#else
 	tag_set->flags =
 		BLK_MQ_F_SHOULD_MERGE | BLK_MQ_F_NO_SCHED;
+#endif
 	tag_set->driver_data = NULL;
 	ret = blk_mq_alloc_tag_set(tag_set);
 
@@ -1740,7 +1773,14 @@ static shannon_request_queue_t *shannon_init_queue(void *data, shannon_spinlock_
 		goto free_blk_mq_data;
 	}
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 9, 0)
+	/* 6.9: blk_mq_init_queue() was removed; blk_mq_alloc_queue() takes the
+	 * tag_set, a queue_limits pointer, and the queuedata pointer (so the
+	 * queuedata assignment below is no longer needed for 6.9+). */
+	queue = blk_mq_alloc_queue(&blk_mq_data->tag_set, NULL, blk_mq_data);
+#else
 	queue = blk_mq_init_queue(&blk_mq_data->tag_set);
+#endif
 	if (SHANNON_IS_ERR(queue)) {
 		shannon_err("Request queue creation failed, err = %ld", (long) SHANNON_PTR_ERR(queue));
 		goto free_tag_set;
@@ -1750,7 +1790,9 @@ static shannon_request_queue_t *shannon_init_queue(void *data, shannon_spinlock_
 	}
 	else {
 		blk_mq_data->original_data = data;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 9, 0)
 		queue->queuedata = blk_mq_data;
+#endif
 	}
 
 	debugs0("<<< queue=0x%08x.\n", queue);
@@ -1802,7 +1844,18 @@ static shannon_request_queue_t *shannon_alloc_queue(void *data, int ns)
 	 * blk_alloc_queue() is not exported since:
 	 *    https://patchwork.kernel.org/project/linux-nvdimm/patch/20210521055116.1053587-27-hch@lst.de/#24196935
 	 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 9, 0)
+	/* 6.9: blk_alloc_disk() now takes (struct queue_limits *, node_id).
+	 * Pass a zeroed queue_limits (the block layer applies defaults for 0
+	 * fields); the real limits are applied later via shannon_blk_queue_*,
+	 * which on 6.9+ set q->limits.* directly. */
+	{
+		struct queue_limits __shannon_qlim = { };
+		disk = blk_alloc_disk(&__shannon_qlim, NUMA_NO_NODE);
+	}
+#else
 	disk = blk_alloc_disk(NUMA_NO_NODE);
+#endif
 	if (IS_ERR(disk))
 	{
 		SHN_BUG_ON(IS_ERR(disk));

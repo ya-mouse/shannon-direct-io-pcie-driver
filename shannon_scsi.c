@@ -430,7 +430,14 @@ static int shannon_scsi_biosparam(struct scsi_device *sdev, struct block_device 
 	return 0;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0)
+/* 6.14: slave_configure was renamed to sdev_configure and gained a
+ * struct queue_limits * argument. */
+static int shannon_scsi_slave_configure(struct scsi_device *sdp,
+		struct queue_limits *lim)
+#else
 static int shannon_scsi_slave_configure(struct scsi_device *sdp)
+#endif
 {
 	shannon_info("slave_configure <%u %u %u %u>\n", sdp->host->host_no, sdp->channel, sdp->id, sdp->lun);
 	if (sdp->host->max_cmd_len != 32)
@@ -441,7 +448,11 @@ static int shannon_scsi_slave_configure(struct scsi_device *sdp)
 #else
 		scsi_adjust_queue_depth(sdp, 0, sdp->host->cmd_per_lun);
 #endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 9, 0)
+	sdp->request_queue->limits.max_segment_size = 512 * 1024;
+#else
 	blk_queue_max_segment_size(sdp->request_queue, 512 * 1024);
+#endif
 	return 0;
 }
 
@@ -450,7 +461,11 @@ static struct scsi_host_template shannon_scsi_template = {
 	.module         = THIS_MODULE,
 	.name           = "Shannon Direct IO",
 	.info           = shannon_scsi_info,
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0)
+	.sdev_configure         = shannon_scsi_slave_configure,
+#else
 	.slave_configure        = shannon_scsi_slave_configure,
+#endif
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 37)
 	.queuecommand           = shannon_scsi_queuecommand_lck,
 #else

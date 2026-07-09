@@ -1,0 +1,114 @@
+# Dockerfile.qemu — reproducible build of a recent QEMU (>=9.2) for the
+# Shannon vfio-pci passthrough workflow.
+#
+# WHY A DOCKER BUILD
+#   The baremetal host that holds the Shannon card(s) may run Ubuntu focal
+#   (stock qemu 4.2) or noble (stock qemu 8.2) — both too old for the vfio
+#   features the workflow needs. We build QEMU from source inside a container
+#   whose base image MATCHES the host codename, so the produced
+#   qemu-system-x86_64 links against the same glibc and runs natively on the
+#   host (the host then only needs the runtime shared libs, installed by
+#   scripts/install-qemu.sh).
+#
+# BUILD ARGS
+#   CODENAME     ubuntu series matching the host: noble|jammy|focal  (default noble)
+#   QEMU_VERSION upstream release, e.g. 11.0.2  (see https://download.qemu.org/)
+#   JOBS         ninja parallelism (default 4)
+#   APT_MIRROR   optional mirror to replace archive.ubuntu.com inside the
+#                container, e.g. http://mirror.xxx/ubuntu (faster if
+#                the host has a local mirror). Empty = use the image default.
+#
+# BUILD (from repo root)
+#   docker build --build-arg QEMU_VERSION=11.0.2 --build-arg CODENAME=noble \
+#       --build-arg JOBS=64 --build-arg APT_MIRROR=http://mirror.xxx/ubuntu \
+#       -t shannon-qemu:11.0.2-noble -f Dockerfile.qemu .
+#
+# EXTRACT THE BUNDLE (host dir mounted at /out)
+#   docker run --rm -v "$HOME/shannon-qemu/qemu-bundle:/out" \
+#       shannon-qemu:11.0.2-noble
+#
+# RUN ON THE HOST (same codename => glibc matches; install-qemu.sh installs
+# the runtime libs the binary needs)
+#   ~/shannon-qemu/qemu-bundle/usr/local/bin/qemu-system-x86_64 --version
+#
+# scripts/install-qemu.sh automates: docker install + docker build + extract
+# + runtime-lib install + verify. It can also fall back to an inline
+# build-script container (--inline) or a native host build (--native).
+
+ARG CODENAME=noble
+FROM ubuntu:${CODENAME} AS builder
+
+ARG QEMU_VERSION=11.0.2
+ARG JOBS=4
+ARG APT_MIRROR=
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Optionally point the container's apt at the host's local mirror (faster,
+# and works even if archive.ubuntu.com is unreachable from the host).
+RUN if [ -n "$APT_MIRROR" ]; then \
+      sed -i \
+        -e "s|http://archive.ubuntu.com/ubuntu|$APT_MIRROR|g" \
+        -e "s|http://security.ubuntu.com/ubuntu|$APT_MIRROR|g" \
+        -e "s|http://ports.ubuntu.com/ubuntu-ports|${APT_MIRROR}-ports|g" \
+        /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null || \
+      sed -i "s|http://archive.ubuntu.com/ubuntu|$APT_MIRROR|g" \
+        /etc/apt/sources.list 2>/dev/null || true; \
+    fi
+
+# Required build deps for QEMU x86_64-softmmu.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential ninja-build python3 python3-venv git wget ca-certificates xz-utils \
+      libglib2.0-dev libpixman-1-dev libfdt-dev zlib1g-dev \
+      libaio-dev libslirp-dev libcap-ng-dev libattr1-dev libseccomp-dev \
+      libusb-1.0-0-dev libusbredirparser-dev \
+      libsasl2-dev libgnutls28-dev libcurl4-openssl-dev libssh-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Optional deps (best-effort; configure auto-detects and skips missing ones).
+# NOTE: we intentionally do NOT install SDL/spice/GTK dev packages: the
+# vfio-pci workflow runs headless (-nographic / -serial), and omitting them
+# keeps the runtime shared-lib surface on the host minimal. liburing enables
+# io_uring (good for guest disk I/O latency).
+RUN apt-get update \
+    && (apt-get install -y --no-install-recommends liburing-dev 2>/dev/null || true) \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /tmp
+RUN wget -q "https://download.qemu.org/qemu-${QEMU_VERSION}.tar.xz" \
+    && tar xf "qemu-${QEMU_VERSION}.tar.xz"
+
+WORKDIR /tmp/qemu-${QEMU_VERSION}
+# Headless build: explicitly disable the GUI backends so the binary does not
+# link SDL/GTK/spice (the host would otherwise need those runtime libs).
+# Full feature set first; fall back to a minimal configure if an optional dep
+# is missing on this base image.
+RUN ./configure --target-list=x86_64-softmmu --prefix=/usr/local \
+        --disable-werror --enable-slirp --enable-virtfs \
+        --disable-sdl --disable-gtk --disable-spice \
+    || ./configure --target-list=x86_64-softmmu --prefix=/usr/local \
+        --disable-werror --disable-sdl --disable-gtk --disable-spice
+RUN ninja -C build -j"${JOBS}"
+# Install into a staging dir inside the image; copied out at `docker run`.
+RUN DESTDIR=/opt/qemu make -C build install \
+    && rm -rf build /tmp/qemu-${QEMU_VERSION}.tar.xz
+
+# --- runtime stage: ships the pre-built tree and copies it to /out ----------
+# Same base image => the binary's glibc expectations match the host.
+FROM ubuntu:${CODENAME}
+COPY --from=builder /opt/qemu /opt/qemu
+# Tiny extractor: copies the staged tree to the mounted output dir (/out).
+# The version check is best-effort (|| true): the slim runtime stage does NOT
+# carry the build libs, so qemu may not run inside this container — the real
+# verification happens on the host (install-qemu.sh installs the runtime libs
+# there and runs `qemu-system-x86_64 --version`).
+RUN printf '%s\n' \
+      '#!/bin/sh' \
+      'set -eu' \
+      'out="${1:-/out}"' \
+      'mkdir -p "$out"' \
+      'cp -a /opt/qemu/. "$out"/' \
+      'echo "==> extracted qemu to $out"' \
+      '"$out/usr/local/bin/qemu-system-x86_64" --version 2>/dev/null || true' \
+    > /usr/local/bin/extract-qemu && chmod +x /usr/local/bin/extract-qemu
+ENTRYPOINT ["/usr/local/bin/extract-qemu"]
+CMD ["/out"]
