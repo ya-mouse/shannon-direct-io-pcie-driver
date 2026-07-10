@@ -134,7 +134,19 @@ int set_thread_highest_prio_normal(void)
 int set_thread_rt(void)
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
-	sched_set_normal(current, MAX_RT_PRIO - 1);
+	/*
+	 * Since 5.9 the per-task scheduler helpers sched_set_fifo() /
+	 * sched_set_normal() / sched_set_fifo_low() were added (commit
+	 * 616d91b68cd5). set_thread_rt() must put the task into SCHED_FIFO
+	 * (real-time), NOT SCHED_NORMAL. The previous code called
+	 * sched_set_normal(current, MAX_RT_PRIO - 1), which:
+	 *   - sets SCHED_NORMAL (CFS), not RT (the thread was never RT), and
+	 *   - passes MAX_RT_PRIO-1 (99) as a *nice* value, which is out of
+	 *     the [-20,19] range, so __sched_setscheduler() rejects it and the
+	 *     call is effectively a no-op. Use sched_set_fifo() instead, which
+	 *   sets SCHED_FIFO at MAX_RT_PRIO-1.
+	 */
+	sched_set_fifo(current);
 	return 0;
 #else
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)

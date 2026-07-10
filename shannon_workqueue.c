@@ -173,11 +173,27 @@ int rt_thread_fn(void *data)
 			rtw->func(rtw);
 			++loop_count;
 			if (loop_count >= RT_MAX_LOOP_COUNT) {
+				loop_count = 0;
 				if (is_rt) {
 					ret = set_thread_normal();
 					is_rt = 0;
-				} else
-					shannon_cond_resched();
+				} else {
+					/*
+					 * Yield to let other tasks run and to advance RCU
+					 * grace periods. shannon_cond_resched() is a no-op on
+					 * PREEMPT kernels (6.x): it neither yields nor provides
+					 * an RCU quiescent point. With constant completion work
+					 * the RT completion thread would otherwise busy-loop
+					 * here and trip rcu_preempt stalls (observed on
+					 * 6.8.0-110-generic). Sleep 1 jiffy (interruptible);
+					 * shannon_rt_queue_work() wake_up_process()'es us as
+					 * soon as new work is queued, so under load this
+					 * returns immediately.
+					 */
+					shannon_set_current_state(SHN_TASK_INTERRUPTIBLE);
+					shannon_schedule_timeout(1);
+					shannon_set_current_state(SHN_TASK_RUNNING);
+				}
 			}
 		}
 		if (!is_rt)
