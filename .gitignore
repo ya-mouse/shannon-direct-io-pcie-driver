@@ -22,3 +22,6 @@ qemu-backup/
 
 # built Go MCP binary (source lives in .opencode/mcp-go/)
 .opencode/mcp/shannon-mcp
+
+# IPMI credentials (never commit)
+.ipmi.creds*
