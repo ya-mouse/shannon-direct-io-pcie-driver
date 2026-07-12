@@ -742,6 +742,6 @@ static void __exit shannon_exit(void)
 }
 
 MODULE_LICENSE("GPL");
-MODULE_VERSION("3.4.3.1");
+MODULE_VERSION("3.4.3.2");
 module_init(shannon_init);
 module_exit(shannon_exit);
