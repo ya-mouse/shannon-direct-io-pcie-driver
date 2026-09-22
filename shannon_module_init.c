@@ -69,9 +69,20 @@ static int shannon_revalidate(struct gendisk *disk)
 }
 #endif
 
+/*
+ * 6.18 switched ->getgeo() from struct block_device * to struct gendisk *
+ * (upstream block pull "for-6.18/block-20250929": "Switch ->getgeo() and
+ * ->bios_param() to using struct gendisk rather than struct block_device").
+ */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
+static int shannon_getgeo(struct gendisk *disk, struct hd_geometry *geo)
+{
+	struct shannon_dev *dev = disk->private_data;
+#else
 static int shannon_getgeo(struct block_device *bdev, struct hd_geometry *geo)
 {
 	struct shannon_dev *dev = bdev->bd_disk->private_data;
+#endif
 
 	/*
 	 * get geometry: we have to fake one...  trim the size to a
@@ -93,9 +104,15 @@ static int shannon_revalidate_ns(struct gendisk *disk)
 }
 #endif
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
+static int shannon_getgeo_ns(struct gendisk *disk, struct hd_geometry *geo)
+{
+	struct shannon_namespace *ns = disk->private_data;
+#else
 static int shannon_getgeo_ns(struct block_device *bdev, struct hd_geometry *geo)
 {
 	struct shannon_namespace *ns = bdev->bd_disk->private_data;
+#endif
 
 	/*
 	 * get geometry: we have to fake one...  trim the size to a

@@ -658,15 +658,59 @@ void *shannon_vmalloc(unsigned long size)
 	return vmalloc(size);
 }
 
+/*
+ * The precompiled core (*.o_shipped, built ~2021) bakes in GFP flag *values*
+ * from the kernel it was compiled against, and GFP bits are not ABI stable.
+ * In 5.x, __GFP_ATOMIC was 0x200; upstream discarded __GFP_ATOMIC in v6.3
+ * (commit 2973d8229b78 "mm: discard __GFP_ATOMIC") and 0x200 became
+ * ___GFP_UNUSED_BIT ("0x200u unused" in gfp_types.h).
+ *
+ * 7.0 added gfp validation to the vmalloc path, so a stale 0x200 is no longer
+ * silently ignored:
+ *   Unexpected gfp: 0x200 (0x200). Fixing up to gfp: 0x0 (). Fix your code!
+ *   WARNING: mm/vmalloc.c:3953 at __vmalloc_noprof+0x77/0x90
+ *    __shannon_vmalloc <- __check_and_alloc_memblock <- check_and_alloc_maptable
+ *    <- recover_lpmt_group <- read_epilog_callback
+ *
+ * The "fix up" masks off every unrecognised bit, which turns the core's
+ * __GFP_ATOMIC request into gfp 0x0 -- no reclaim at all -- so the map-table
+ * allocation during epilog recovery could spuriously fail. Translate the
+ * legacy bit back to the modern GFP_ATOMIC equivalent
+ * (__GFP_HIGH | __GFP_KSWAPD_RECLAIM), preserving the core's intent.
+ *
+ * On kernels < 6.3 the bit is still a live __GFP_ATOMIC and must pass through
+ * untouched.
+ */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
+#define SHANNON_LEGACY___GFP_ATOMIC	0x200u
+
+static inline gfp_t shannon_gfp_fixup(shannon_gfp_t gfp_mask)
+{
+	gfp_t gfp = (__force gfp_t)gfp_mask;
+
+	if (gfp & (gfp_t)SHANNON_LEGACY___GFP_ATOMIC) {
+		gfp &= ~(gfp_t)SHANNON_LEGACY___GFP_ATOMIC;
+		gfp |= GFP_ATOMIC;
+	}
+
+	return gfp;
+}
+#else
+static inline gfp_t shannon_gfp_fixup(shannon_gfp_t gfp_mask)
+{
+	return (__force gfp_t)gfp_mask;
+}
+#endif
+
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
 void *__shannon_vmalloc(unsigned long size, shannon_gfp_t gfp_mask)
 {
-	return __vmalloc(size, gfp_mask);
+	return __vmalloc(size, shannon_gfp_fixup(gfp_mask));
 }
 #else
 void *__shannon_vmalloc(unsigned long size, shannon_gfp_t gfp_mask)
 {
-	return __vmalloc(size, gfp_mask, PAGE_KERNEL);
+	return __vmalloc(size, shannon_gfp_fixup(gfp_mask), PAGE_KERNEL);
 }
 #endif
 

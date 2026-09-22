@@ -61,11 +61,11 @@ dst_sha=$(sha256sum "$tmp/dst.img" | awk '{print $1}')
 say "dst sha256: $dst_sha"
 if [ "$src_sha" = "$dst_sha" ]; then
   say "SEQ: OK"
-  add_check seq_$(${size_mb}MB) true ",\"src_sha\":\"$src_sha\",\"dst_sha\":\"$dst_sha\""
+  add_check "seq_${size_mb}MB" true ",\"src_sha\":\"$src_sha\",\"dst_sha\":\"$dst_sha\""
 else
   say "SEQ: FAIL"
   cmp "$tmp/src.img" "$tmp/dst.img" 2>/dev/null || true
-  add_check seq_$(${size_mb}MB) false ",\"src_sha\":\"$src_sha\",\"dst_sha\":\"$dst_sha\""
+  add_check "seq_${size_mb}MB" false ",\"src_sha\":\"$src_sha\",\"dst_sha\":\"$dst_sha\""
   rc=1
 fi
 
@@ -93,8 +93,13 @@ say "== 3) marker overwrite-check =="
 printf 'SHANNON-INTEGRITY-MARKER-0123456789ABCDEF' > "$tmp/marker"
 dd if="$tmp/marker" of="$dev" bs=4K count=1 conv=notrunc 2>/dev/null
 sync
+# Read back a whole 4K block, then compare only the marker's own length: the
+# readback is padded with the device's existing contents, so comparing the
+# files directly would always report a size mismatch.
 dd if="$dev" of="$tmp/marker2" bs=4K count=1 2>/dev/null
-if cmp -s "$tmp/marker" "$tmp/marker2" 2>/dev/null; then
+mlen=$(wc -c < "$tmp/marker")
+head -c "$mlen" "$tmp/marker2" > "$tmp/marker3"
+if cmp -s "$tmp/marker" "$tmp/marker3" 2>/dev/null; then
   say "MARKER: OK"
   add_check marker true ""
 else

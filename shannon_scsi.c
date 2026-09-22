@@ -365,9 +365,9 @@ int shannon_convert_scsi_scmd(struct shannon_bio *sbio, int logicb_size)
 extern int shannon_receive_scsi_cmd(struct shannon_bio *sbio, unsigned char *sense_buffer);
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
-static int shannon_scsi_queuecommand_lck(struct scsi_cmnd *scsi_cmnd)
+static SHANNON_SCSI_QC_STATUS shannon_scsi_queuecommand_lck(struct scsi_cmnd *scsi_cmnd)
 #else
-static int shannon_scsi_queuecommand_lck(struct scsi_cmnd *scsi_cmnd, void (*done_fn)(struct scsi_cmnd *))
+static SHANNON_SCSI_QC_STATUS shannon_scsi_queuecommand_lck(struct scsi_cmnd *scsi_cmnd, void (*done_fn)(struct scsi_cmnd *))
 #endif
 {
 	struct Scsi_Host *shost = scsi_cmnd->device->host;
@@ -411,7 +411,12 @@ static const char *shannon_scsi_info(struct Scsi_Host *host)
 	return "Shannon Direct IO  SCSI Adapter.\n";
 }
 
+/* 6.18 switched ->bios_param() from struct block_device * to struct gendisk *. */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
+static int shannon_scsi_biosparam(struct scsi_device *sdev, struct gendisk *disk, sector_t capacity, int geom[])
+#else
 static int shannon_scsi_biosparam(struct scsi_device *sdev, struct block_device *bdev, sector_t capacity, int geom[])
+#endif
 {
 	int heads, sectors, cylinders;
 

@@ -7,7 +7,7 @@
 # match the host topology (the original used --cpus_allowed=10-63
 # --cpus_allowed_policy=split --numa_mem_policy=bind:...).
 #
-# Usage: fio-workload.sh /dev/dfd [randread|seqread|randwrite|seqwrite|all]
+# Usage: fio-workload.sh /dev/dfd [randread|seqread|randwrite|seqwrite|randrw|all]
 set -eu
 
 dev=${1:?usage: $0 /dev/dfd [profile]}
@@ -38,11 +38,20 @@ seqwrite() {
     --name=seq_write --eta-newline=1
 }
 
+# Mixed read/write: 70/30 read/write at 4K, the profile most likely to expose
+# a write-completion stall (bufq_alloc_cmd_sleepable / check_pending_command_queue).
+randrw() {
+  fio --filename="$dev" --direct=1 --rw=randrw --rwmixread=70 --bs=4k \
+    --ioengine=libaio --iodepth=32 --runtime=60 --numjobs=4 --time_based \
+    --group_reporting --name=rand_4k_mixrw --eta-newline=1
+}
+
 case "$profile" in
   randread)  randread ;;
   seqread)   seqread ;;
   randwrite) randwrite ;;
   seqwrite)  seqwrite ;;
-  all)       randread; seqread; randwrite; seqwrite ;;
-  *) echo "unknown profile: $profile (use randread|seqread|randwrite|seqwrite|all)" >&2; exit 2 ;;
+  randrw)    randrw ;;
+  all)       randread; seqread; randwrite; seqwrite; randrw ;;
+  *) echo "unknown profile: $profile (use randread|seqread|randwrite|seqwrite|randrw|all)" >&2; exit 2 ;;
 esac

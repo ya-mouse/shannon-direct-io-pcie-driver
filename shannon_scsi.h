@@ -2,7 +2,19 @@
 #define __SHANNON_SCSI_H
 
 #include <scsi/scsi_host.h>
+#include <linux/version.h>
 #include "shannon_workqueue.h"
+
+/*
+ * 7.0 changed the return type of the .queuecommand() callback (and of the
+ * DEF_SCSI_QCMD() wrapper that generates it) from int to
+ * enum scsi_qc_status, which now carries the SCSI_MLQUEUE_* codes.
+ */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+#define SHANNON_SCSI_QC_STATUS	enum scsi_qc_status
+#else
+#define SHANNON_SCSI_QC_STATUS	int
+#endif
 
 #define SHANNON_SCSI_SENSE_LEN	32
 
@@ -145,6 +157,6 @@ extern unsigned long shannon_scsi_msecs(struct shannon_scsi_private *hostdata, i
 extern int shannon_convert_scsi_scmd(struct shannon_bio *sbio, int logicb_size);
 extern int shannon_scsi_probe(struct pci_dev *pdev, const struct pci_device_id *id);
 extern void shannon_scsi_remove(struct pci_dev *pdev);
-extern int shannon_scsi_queuecommand(struct Scsi_Host *shost, struct scsi_cmnd *cmd);
+extern SHANNON_SCSI_QC_STATUS shannon_scsi_queuecommand(struct Scsi_Host *shost, struct scsi_cmnd *cmd);
 
 #endif /* __SHANNON_SCSI_H */
