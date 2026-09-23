@@ -21,6 +21,12 @@
 #include <linux/pci.h>
 #include <linux/pm_qos.h>
 #include "shannon_list.h"
+/*
+ * Translation of the allocator/slab flag *encodings* frozen into the
+ * precompiled core (*.o_shipped).  Must come after <linux/gfp.h>.
+ * See docs/flag-abi-drift.md.
+ */
+#include "shannon_gfp_legacy.h"
 
 #define RESERVE_MEM(bytes) char mem[bytes] __attribute__ ((aligned(8)))
 

@@ -704,9 +704,43 @@ int check_has_dma_delay(void)
 	return 0;
 }
 
+/*
+ * Log how the precompiled core's baked-in gfp values are being interpreted on
+ * this kernel, once, at load.  The gfp encoding is invisible in every other
+ * way -- a mistranslation shows up only as allocation failures under pressure
+ * or as a "Unexpected gfp" warning from mm/vmalloc.c -- so printing the table
+ * into the serial log makes it checkable during bring-up.  %pGg renders the
+ * result with the kernel's own gfp symbol decoder.
+ */
+static void __init shannon_gfp_xlate_selftest(void)
+{
+	static const unsigned int legacy[] = {
+		SHANNON_LEGACY_GFP_NOIO,		/* 0x10:  127 core call sites */
+		SHANNON_LEGACY_GFP_ATOMIC_NOWARN,	/* 0x220:  26 core call sites */
+		SHANNON_LEGACY_GFP_NOWARN,		/* 0x200:   4 core call sites */
+	};
+	unsigned int i;
+
+	shannon_gfp_assert_native();
+
+	if (SHANNON_GFP_LEGACY_KERNEL) {
+		shannon_info("legacy gfp xlate: inactive, this kernel still uses the core's encoding\n");
+		return;
+	}
+
+	for (i = 0; i < ARRAY_SIZE(legacy); i++) {
+		gfp_t g = shannon_gfp_xlate(legacy[i]);
+
+		shannon_info("legacy gfp %#x -> %#x (%pGg)\n",
+			     legacy[i], SHANNON_GFP_RAW(g), &g);
+	}
+}
+
 static int __init shannon_init(void)
 {
 	int result = -ENOMEM;
+
+	shannon_gfp_xlate_selftest();
 
 	if (shannon_scsi_mode) {
 		shannon_use_percpu_wq = 1;

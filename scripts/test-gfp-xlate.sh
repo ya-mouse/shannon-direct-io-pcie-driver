@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+#
+# test-gfp-xlate.sh -- development-only check that shannon_gfp_xlate() maps the
+# flag values baked into *.o_shipped onto the encoding of a *specific* kernel.
+#
+# The translation in shannon_gfp_legacy.h is invisible at runtime: a wrong
+# mapping still builds, still loads, and only shows up as allocations failing
+# under pressure (or as a "Unexpected gfp" warning from mm/vmalloc.c).  This
+# script closes that gap by compiling tests/gfp-xlate-harness.c against the real
+# GFP_*/SLAB_* values lifted out of a kernel git tree, for as many releases as
+# you ask for.
+#
+# The kernel tree is used strictly read-only (git show / git ls-tree): it is
+# never checked out, never built, never written to, so it is safe to point this
+# at a tree another session is working in.
+#
+# Usage:
+#   scripts/test-gfp-xlate.sh --tree /path/to/linux [--tags v5.15,v6.8,v6.19]
+#   scripts/test-gfp-xlate.sh --tree /path/to/linux --tags v3.10 --keep
+#
+# Exit status: 0 if every requested kernel passes, 1 otherwise.
+
+set -u
+
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+TREE=""
+TAGS="v3.10,v5.15,v6.8,v6.12,v6.19"
+CC="${CC:-cc}"
+KEEP=0
+
+usage() { sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--tree)  TREE="$2"; shift 2 ;;
+	--tags)  TAGS="$2"; shift 2 ;;
+	--cc)    CC="$2"; shift 2 ;;
+	--keep)  KEEP=1; shift ;;
+	-h|--help) usage 0 ;;
+	*) echo "unknown argument: $1" >&2; usage 1 ;;
+	esac
+done
+
+[ -n "$TREE" ] || { echo "error: --tree <kernel git tree> is required" >&2; usage 1; }
+[ -d "$TREE/.git" ] || { echo "error: $TREE is not a git tree" >&2; exit 1; }
+command -v python3 >/dev/null || { echo "error: python3 not found" >&2; exit 1; }
+command -v "$CC" >/dev/null || { echo "error: compiler $CC not found" >&2; exit 1; }
+
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/shannon-gfp-xlate.XXXXXX")
+trap '[ "$KEEP" = 1 ] || rm -rf "$WORK"' EXIT
+[ "$KEEP" = 1 ] && echo "keeping intermediates in $WORK"
+
+# --------------------------------------------------------------------------
+# Generate a stub header carrying the real flag values of one kernel tag.
+# --------------------------------------------------------------------------
+gen_stub() { # $1=tag $2=outfile
+	python3 - "$TREE" "$1" "$2" <<'PYEOF'
+import importlib.util, os, re, subprocess, sys
+
+tree, tag, out = sys.argv[1], sys.argv[2], sys.argv[3]
+repo = os.environ["SHANNON_REPO"]
+
+# reuse the harvesting/resolving logic that the audit tool already implements,
+# so this test and the audit can never disagree about a kernel's encoding
+spec = importlib.util.spec_from_file_location(
+    "kfa", os.path.join(repo, "scripts", "kernel-flag-abi.py"))
+kfa = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(kfa)
+
+def show(path):
+    r = subprocess.run(["git", "-C", tree, "show", "%s:%s" % (tag, path)],
+                       capture_output=True, text=True)
+    return r.stdout if r.returncode == 0 else ""
+
+# authoritative version numbers, straight from the tag's top-level Makefile
+mk = show("Makefile")
+ver = {}
+for key in ("VERSION", "PATCHLEVEL", "SUBLEVEL"):
+    m = re.search(r"^%s\s*=\s*(\d+)" % key, mk, re.M)
+    ver[key] = int(m.group(1)) if m else 0
+lvc = (ver["VERSION"] << 16) + (ver["PATCHLEVEL"] << 8) + ver["SUBLEVEL"]
+
+values = {}
+for fam in ("gfp", "slab"):
+    h = kfa.harvest(tree, tag, fam)
+    if not h:
+        sys.exit("error: no %s definitions found at %s (header moved?)" % (fam, tag))
+    for n, v in h["values"].items():
+        if v is not None and 0 <= v < (1 << 32):
+            values.setdefault(n, v)
+
+# __GFP_WAIT existing is exactly what makes shannon_gfp_legacy.h take the
+# legacy path, so its presence/absence must faithfully reflect the tag.
+# The harness needs a different set depending on which side of the v4.4
+# __GFP_WAIT -> __GFP_RECLAIM split the tag falls on.  Requiring the modern
+# names on a 3.x kernel would be wrong: their *absence* is precisely what makes
+# shannon_gfp_legacy.h take the identity path.
+legacy = "__GFP_WAIT" in values
+if legacy:
+    needed = ["__GFP_WAIT", "__GFP_HIGH", "__GFP_IO", "__GFP_FS", "__GFP_NOWARN",
+              "__GFP_NOFAIL", "__GFP_NORETRY", "__GFP_COMP", "__GFP_ZERO",
+              "GFP_KERNEL", "GFP_ATOMIC", "GFP_NOIO", "GFP_NOFS", "GFP_NOWAIT",
+              "SLAB_HWCACHE_ALIGN"]
+else:
+    needed = ["__GFP_RECLAIM", "__GFP_DIRECT_RECLAIM", "__GFP_KSWAPD_RECLAIM",
+              "__GFP_HIGH", "__GFP_IO", "__GFP_FS", "__GFP_NOWARN",
+              "__GFP_NOFAIL", "__GFP_NORETRY", "__GFP_COMP", "__GFP_ZERO",
+              "GFP_KERNEL", "GFP_ATOMIC", "GFP_NOIO", "GFP_NOFS", "GFP_NOWAIT",
+              "SLAB_HWCACHE_ALIGN"]
+missing = [n for n in needed if n not in values]
+# __GFP_REPEAT/__GFP_RETRY_MAYFAIL and the SLUB_DEBUG-only SLAB_ flags are
+# genuinely optional; everything above must resolve or the test proves nothing.
+if missing:
+    sys.exit("error: could not resolve at %s: %s" % (tag, ", ".join(missing)))
+
+with open(out, "w") as f:
+    f.write("/* generated by scripts/test-gfp-xlate.sh from %s @ %s -- do not edit */\n"
+            % (tree, tag))
+    f.write("#ifndef SHANNON_GFP_STUB_H\n#define SHANNON_GFP_STUB_H\n")
+    f.write("typedef unsigned int gfp_t;\n")
+    f.write("typedef unsigned int slab_flags_t;\n")
+    f.write("#define LINUX_VERSION_CODE %d\t/* %d.%d.%d */\n"
+            % (lvc, ver["VERSION"], ver["PATCHLEVEL"], ver["SUBLEVEL"]))
+    for n in sorted(values):
+        f.write("#define %s %#xU\n" % (n, values[n]))
+    f.write("#endif\n")
+print("%d.%d.%d" % (ver["VERSION"], ver["PATCHLEVEL"], ver["SUBLEVEL"]),
+      len(values))
+PYEOF
+}
+
+# --------------------------------------------------------------------------
+pass=0; fail=0; failed_tags=""
+IFS=',' read -r -a TAGLIST <<< "$TAGS"
+for tag in "${TAGLIST[@]}"; do
+	stub="$WORK/stub-${tag}.h"
+	bin="$WORK/harness-${tag}"
+	echo "==================================================================="
+	printf '### %s: ' "$tag"
+	if ! info=$(SHANNON_REPO="$REPO" gen_stub "$tag" "$stub" 2>&1); then
+		echo "SKIP"; echo "$info" | sed 's/^/    /'
+		fail=$((fail+1)); failed_tags="$failed_tags $tag(gen)"
+		continue
+	fi
+	echo "kernel $info"
+
+	if ! "$CC" -Wall -Wextra -Wno-unused-parameter -std=gnu99 \
+		 -I"$REPO" -include "$stub" \
+		 "$REPO/tests/gfp-xlate-harness.c" -o "$bin" 2>"$WORK/cc-$tag.log"; then
+		echo "  COMPILE FAILED"; sed 's/^/    /' "$WORK/cc-$tag.log"
+		fail=$((fail+1)); failed_tags="$failed_tags $tag(cc)"
+		continue
+	fi
+	[ -s "$WORK/cc-$tag.log" ] && sed 's/^/    warning: /' "$WORK/cc-$tag.log"
+
+	if "$bin"; then
+		pass=$((pass+1))
+	else
+		fail=$((fail+1)); failed_tags="$failed_tags $tag"
+	fi
+done
+
+echo "==================================================================="
+echo "gfp/slab translation: $pass passed, $fail failed"
+[ -n "$failed_tags" ] && echo "failed:$failed_tags"
+[ "$fail" = 0 ]

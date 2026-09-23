@@ -145,6 +145,14 @@ extern void submit_sbio_task_ns(struct shannon_work_struct *work);
 
 //  bio.h
 #define BIO_RW_PRIO	16
+/*
+ * How many flag bits bio->bi_flags can actually hold on *this* kernel.  It was
+ * 'unsigned long' in the 2.6.x the core was built against, 'unsigned int' at
+ * v4.4, and 'unsigned short' from v4.8 (commit c0acf12a50c2 "block: shrink bio
+ * size again") -- so BIO_RW_PRIO (bit 16) is no longer representable and
+ * shannon_bio_flagged() must not pretend otherwise.
+ */
+#define SHANNON_BIO_FLAG_BITS	(8 * sizeof(((struct bio *)NULL)->bi_flags))
 extern shannon_sector_t get_bi_sector(shannon_bio_t *bio);
 extern int shannon_bio_flagged(shannon_bio_t *bio, unsigned int flag);
 extern unsigned long shannon_bio_data_dir(shannon_bio_t *bio);

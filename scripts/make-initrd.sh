@@ -5,14 +5,22 @@
 #
 # Usage:
 #   make-initrd.sh --host HOST --kernel <kver> \
-#       [--src PATH] [--qemu-dir DIR] [--initrd-template <dir|tarball>] [--no-skip-epilog]
+#       [--src PATH] [--qemu-dir DIR] [--initrd-template <dir|tarball>] \
+#       [--no-skip-epilog] [--no-fast-boot] [--full-recovery]
 #
 # --initrd-template: a directory or tarball with a busybox /bin to seed the
 #   rootfs. If omitted, the script AUTO-BOOTSTRAPS a minimal busybox root by
 #   installing busybox-static on the host and symlinking applets.
-# --no-skip-epilog:  load the driver WITHOUT shannon_skip_epilog=1 (full
-#   recovery) for data-integrity runs. Default loads with skip-epilog for
-#   fast debug bring-up.
+# --no-skip-epilog:  load the driver WITHOUT shannon_skip_epilog=1.
+# --no-fast-boot:    load the driver WITHOUT shannon_fast_boot_enable=1.
+# --full-recovery:   both of the above, i.e. insmod with NO debug parameters.
+#
+# NOTE: dropping shannon_skip_epilog alone is NOT enough to get a full epilog
+# recovery -- shannon_fast_boot_enable=1 by itself also skips it.  Verified on
+# 7.0.0-31-generic: with fast_boot=1 and no skip_epilog the guest printed 0
+# "recover N00 superblock's epilog done" lines and probed in ~60 s, whereas a
+# param-free load prints ~43 of them over ~8 min.  Use --full-recovery for
+# data-integrity runs and for exercising the recovery-time allocation paths.
 set -eu
 
 # Portable in-place sed: sedi FILE EXPR...  (BSD sed -i and GNU sed -i differ
@@ -25,6 +33,7 @@ src='$HOME/shannon-src'
 qemu_dir='$HOME/shannon-qemu'
 initrd_template=
 skip_epilog=1
+fast_boot=1
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -34,6 +43,8 @@ while [ $# -gt 0 ]; do
     --qemu-dir) shift; qemu_dir="$1" ;;
     --initrd-template) shift; initrd_template="$1" ;;
     --no-skip-epilog) skip_epilog=0 ;;
+    --no-fast-boot) fast_boot=0 ;;
+    --full-recovery) skip_epilog=0; fast_boot=0 ;;
     --help|-h) sed -n '2,15p' "$0"; exit 0 ;;
     *)
       if [ -z "$host" ]; then host="$1"
@@ -62,11 +73,15 @@ else
 fi
 
 # 1. Generate the /init script locally (quoted heredoc => literal content).
-if [ "$skip_epilog" -eq 1 ]; then
-  modparams='shannon_fast_boot_enable=1 shannon_skip_epilog=1'
-else
-  modparams='shannon_fast_boot_enable=1'
+modparams=
+if [ "$fast_boot" -eq 1 ]; then
+  modparams="$modparams shannon_fast_boot_enable=1"
 fi
+if [ "$skip_epilog" -eq 1 ]; then
+  modparams="$modparams shannon_skip_epilog=1"
+fi
+modparams=$(printf '%s' "$modparams" | sed 's/^ *//')
+echo "==> init will insmod with: ${modparams:-<no parameters: full recovery>}"
 init_tmp=$(mktemp)
 cat > "$init_tmp" <<'INIT'
 #!/bin/sh

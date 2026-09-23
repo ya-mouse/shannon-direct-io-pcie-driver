@@ -608,7 +608,7 @@ void shannon_free_page(unsigned long addr)
 
 unsigned long __shannon_get_free_page(gfp_t gfp)
 {
-	return __get_free_page(gfp);
+	return __get_free_page(shannon_gfp_xlate(SHANNON_GFP_RAW(gfp)));
 }
 
 // topology.h
@@ -659,58 +659,25 @@ void *shannon_vmalloc(unsigned long size)
 }
 
 /*
- * The precompiled core (*.o_shipped, built ~2021) bakes in GFP flag *values*
- * from the kernel it was compiled against, and GFP bits are not ABI stable.
- * In 5.x, __GFP_ATOMIC was 0x200; upstream discarded __GFP_ATOMIC in v6.3
- * (commit 2973d8229b78 "mm: discard __GFP_ATOMIC") and 0x200 became
- * ___GFP_UNUSED_BIT ("0x200u unused" in gfp_types.h).
+ * The precompiled core (*.o_shipped) bakes in GFP flag *values* from the kernel
+ * it was compiled against -- a 2.6.x/3.x-era gfp.h, per .comment (gcc 4.1.2) and
+ * per the immediates in its .text.  Flag values are not part of any ABI that
+ * modversions can check, so every gfp the core hands us must be translated.
  *
- * 7.0 added gfp validation to the vmalloc path, so a stale 0x200 is no longer
- * silently ignored:
- *   Unexpected gfp: 0x200 (0x200). Fixing up to gfp: 0x0 (). Fix your code!
- *   WARNING: mm/vmalloc.c:3953 at __vmalloc_noprof+0x77/0x90
- *    __shannon_vmalloc <- __check_and_alloc_memblock <- check_and_alloc_maptable
- *    <- recover_lpmt_group <- read_epilog_callback
- *
- * The "fix up" masks off every unrecognised bit, which turns the core's
- * __GFP_ATOMIC request into gfp 0x0 -- no reclaim at all -- so the map-table
- * allocation during epilog recovery could spuriously fail. Translate the
- * legacy bit back to the modern GFP_ATOMIC equivalent
- * (__GFP_HIGH | __GFP_KSWAPD_RECLAIM), preserving the core's intent.
- *
- * On kernels < 6.3 the bit is still a live __GFP_ATOMIC and must pass through
- * untouched.
+ * All of the encoding knowledge, the evidence for it, and the rules for telling
+ * a legacy value apart from one this driver produced itself live in
+ * shannon_gfp_legacy.h; see docs/flag-abi-drift.md.  Every wrapper below that
+ * forwards a gfp must go through shannon_gfp_xlate().
  */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
-#define SHANNON_LEGACY___GFP_ATOMIC	0x200u
-
-static inline gfp_t shannon_gfp_fixup(shannon_gfp_t gfp_mask)
-{
-	gfp_t gfp = (__force gfp_t)gfp_mask;
-
-	if (gfp & (gfp_t)SHANNON_LEGACY___GFP_ATOMIC) {
-		gfp &= ~(gfp_t)SHANNON_LEGACY___GFP_ATOMIC;
-		gfp |= GFP_ATOMIC;
-	}
-
-	return gfp;
-}
-#else
-static inline gfp_t shannon_gfp_fixup(shannon_gfp_t gfp_mask)
-{
-	return (__force gfp_t)gfp_mask;
-}
-#endif
-
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
 void *__shannon_vmalloc(unsigned long size, shannon_gfp_t gfp_mask)
 {
-	return __vmalloc(size, shannon_gfp_fixup(gfp_mask));
+	return __vmalloc(size, shannon_gfp_xlate(SHANNON_GFP_RAW(gfp_mask)));
 }
 #else
 void *__shannon_vmalloc(unsigned long size, shannon_gfp_t gfp_mask)
 {
-	return __vmalloc(size, shannon_gfp_fixup(gfp_mask), PAGE_KERNEL);
+	return __vmalloc(size, shannon_gfp_xlate(SHANNON_GFP_RAW(gfp_mask)), PAGE_KERNEL);
 }
 #endif
 
@@ -728,6 +695,14 @@ void *shannon_vmalloc_to_page(void *vmalloc_addr)
 shannon_kmem_cache_t *shannon_kmem_cache_create(const char *name, size_t size, size_t align,
 		unsigned long flags, void (*ctor)(void *))
 {
+	unsigned long unknown = shannon_slab_flags_unknown(flags);
+
+	if (unlikely(unknown))
+		shannon_warn("slab flags %#lx not translatable from the precompiled core's encoding, dropped\n",
+			     unknown);
+
+	flags = shannon_slab_flags_xlate(flags);
+
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)
 
 	return kmem_cache_create(name, size, align, flags, ctor);
@@ -746,12 +721,12 @@ void shannon_kmem_cache_destroy(shannon_kmem_cache_t *cachep)
 
 void *shannon_kzalloc(size_t size, shannon_gfp_t flags)
 {
-	return kzalloc(size, flags);
+	return kzalloc(size, shannon_gfp_xlate(SHANNON_GFP_RAW(flags)));
 }
 
 void *shannon_kmalloc(size_t size, shannon_gfp_t flags)
 {
-	return kmalloc(size, flags);
+	return kmalloc(size, shannon_gfp_xlate(SHANNON_GFP_RAW(flags)));
 }
 
 void shannon_kfree(const void *p)
@@ -795,7 +770,14 @@ void shannon_mempool_destroy(shannon_mempool_t *pool)
 
 void *shannon_mempool_alloc(shannon_mempool_t *pool, shannon_gfp_t gfp_mask)
 {
-	return mempool_alloc((mempool_t *)pool, gfp_mask);
+	/*
+	 * alloc_sbio() forwards its gfp argument straight here, so this is the
+	 * I/O submission path.  mempool_alloc() only waits for the pool to be
+	 * refilled when __GFP_DIRECT_RECLAIM is set, which the core's legacy
+	 * 0x10 does not contain -- translating restores that guarantee.
+	 */
+	return mempool_alloc((mempool_t *)pool,
+			     shannon_gfp_xlate(SHANNON_GFP_RAW(gfp_mask)));
 }
 
 void shannon_mempool_free(void *element, shannon_mempool_t *pool)
@@ -841,7 +823,7 @@ char *shannon_kasprintf(shannon_gfp_t gfp, const char *fmt, ...)
 	char *p;
 
 	va_start(ap, fmt);
-	p = kvasprintf(gfp, fmt, ap);
+	p = kvasprintf(shannon_gfp_xlate(SHANNON_GFP_RAW(gfp)), fmt, ap);
 	va_end(ap);
 
 	return p;

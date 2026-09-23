@@ -21,6 +21,10 @@ architecture; summary below.
   kernel header each wrapper group mirrors.
 - `decompiled-probe.txt` has reverse-engineered `shannon_dev` offsets
   (`0xed28` bytes); `shannon_device.c.diff` is a model 5.8 port.
+- The core references only **five** kernel symbols directly (`printk`, `memcpy`,
+  `strcmp`, `strncpy`, `dump_stack`); its other 301 external references are all
+  satisfied by the wrappers. It also has **no `__versions` section**, so
+  modversions does not even type-check those five.
 
 ## Build (on the remote baremetal host with `linux-headers-<kver>`)
 
@@ -31,6 +35,40 @@ make KERNELVER=6.8.0-48-generic shipped modules
 The Makefile runs `objcopy --redefine-sym printk=_printk` (≥5.15) and
 `--weaken-symbol shannon_attach_sdev` on each `*.o_shipped`, then the kernel
 build compiles the wrappers and links `shannon.ko`.
+
+## Flag / constant ABI drift (the silent porting hazard)
+
+Constants inside the wrappers are recompiled per kernel and are therefore always
+correct. The exception is a kernel-derived **flag value frozen into
+`*.o_shipped`** and forwarded by a wrapper: `objcopy` can fix symbol *names*, but
+nothing can fix a stale *value*. No compiler, CRC or loader check catches it —
+modversions covers types, and `gfp_t` is the same type whether it holds
+`GFP_NOIO` or garbage.
+
+What the core actually bakes in (from `scripts/probe-shipped-flags.py`): `gfp
+0x10` ×127, `0x220` ×26, `0x200` ×4, `SLAB_HWCACHE_ALIGN 0x2000` ×2,
+`BIO_RW_PRIO 16` ×1. In its own 2.6.x/3.x-era encoding `0x10` is `GFP_NOIO`;
+here it is `___GFP_RECLAIMABLE`, i.e. **no reclaim at all**, which also defeats
+`mempool_alloc()`'s wait-for-refill (gated on `__GFP_DIRECT_RECLAIM`) in the sbio
+I/O path, and on v6.19 makes `__vmalloc` print `Unexpected gfp … Fix your code!`.
+
+Translated in `shannon_gfp_legacy.h`, applied at every gfp-forwarding wrapper,
+and logged at load as `shn_info: legacy gfp 0x10 -> 0xc00 (GFP_NOIO)`. Because
+the same wrappers are also called by our own code with *this* kernel's values,
+translation is gated on a value classifier plus `BUILD_BUG_ON` assertions, never
+applied blindly.
+
+```
+scripts/probe-shipped-flags.py                       # constants baked into the core
+scripts/kernel-flag-abi.py --tree <linux-git> \
+    --tags v5.15,v6.19 --family all --only-drift     # what the kernel calls them
+scripts/test-gfp-xlate.sh --tree <linux-git>         # translation tests, 7 kernels
+```
+
+`kernel-flag-abi.py` uses only `git show`/`git ls-tree` — **never check out or
+build a shared kernel tree**. Full method, findings, verified version boundaries
+and upstream commits: **`docs/flag-abi-drift.md`**. Re-run the probe after any new
+`*.o_shipped` drop and the flag tests after any kernel bump.
 
 ## Canonical development lifecycle
 

@@ -90,6 +90,17 @@ Inspect their symbols with `nm shannon_main.o_shipped` (e.g. `nm ... | grep
 printk`). They are **relinked** into `.o` at build time by the Makefile (see
 §4).
 
+Two facts about them matter when porting, and both are easy to get wrong:
+
+- They reference only **five** kernel symbols directly (`printk`, `memcpy`,
+  `strcmp`, `strncpy`, `dump_stack`); the other 301 external references are
+  satisfied by the wrappers. They also carry **no `__versions` section**, so
+  modversions does not type-check even those five.
+- Every kernel-derived *constant* they pass to a wrapper is frozen at the vendor
+  build kernel's encoding (2.6.x/3.x-era, per `.comment`: gcc 4.1.2). Flag
+  **values** are not types, so no CRC, compiler or loader check can catch drift.
+  See §9 and **`docs/flag-abi-drift.md`**.
+
 ### 3.2 Open-source wrappers (`.c`)
 
 | file | role | porting hot spots |
@@ -130,7 +141,10 @@ printk`). They are **relinked** into `.o` at build time by the Makefile (see
 1. **`shipped`** — `objcopy` each `*.o_shipped` into a `*.o`:
    - `--redefine-sym printk=_printk` for kernels ≥ 5.15 (the kernel renamed
      `printk`→`_printk`; the proprietary core still emits `printk` relocations,
-     so they must be redirected or the module won't link).
+     so they must be redirected or the module won't link).  `printk` is one of
+     only five kernel symbols the core references directly — see §3.1 and §9.
+     Note that objcopy fixes symbol *names* only; it cannot fix stale flag
+     *values*, which is what §9 is about.
    - `--weaken-symbol shannon_attach_sdev` so the open-source
      `shannon_attach_sdev` override in `shannon_block.c`/`shannon_module_init.c`
      wins over the core's copy.
@@ -208,3 +222,32 @@ recipe live in **`docs/crash-traces.md`** (kept in-tree).
 - The driver probes via `shannon_probe_wrapper` → `local_pci_probe` →
   `shannon_probe` (core) → `shannon_init_hardware` → `get_pci_info` →
   `shannon_attach` → `shannon_attach_sdev` → `shannon_add_disk`.
+
+## 9. Flag / constant ABI drift (read before porting)
+
+The core does not call kernel allocators, DMA or block APIs directly — it passes
+**flag values** to `shannon_*()` wrappers that forward them. Those immediates
+were frozen at the vendor's build kernel (2.6.x/3.x-era gfp.h), and a flag
+*value* is invisible to every automated check: the compiler does not see the
+core's source, modversions CRCs cover types only, and the module links and loads
+regardless. The failure mode is behavioural, not a build error.
+
+Concretely, `*.o_shipped` bakes in `gfp 0x10` (127 call sites — `GFP_NOIO` in its
+own encoding, `___GFP_RECLAIMABLE` in ours), `0x220` (26), `0x200` (4),
+`SLAB_HWCACHE_ALIGN 0x2000` (2, renumbered to `0x10` in v6.9) and
+`BIO_RW_PRIO 16` (1, unrepresentable since `bi_flags` became `unsigned short` in
+v4.8). Left untranslated these silently remove reclaim from every core
+allocation, defeat the mempool forward-progress guarantee in the sbio path, and
+trigger `Unexpected gfp … Fix your code!` from `mm/vmalloc.c` on v6.19+.
+
+`shannon_gfp_legacy.h` holds the legacy encoding table and the translators;
+`shannon_gfp_xlate()` is applied at every gfp-forwarding wrapper, and the mapping
+is logged at module load (`shn_info: legacy gfp 0x10 -> 0xc00 (GFP_NOIO)`).
+Because the same wrappers are also called by the open-source code with *this*
+kernel's values, translation is gated on a value classifier plus
+`BUILD_BUG_ON` assertions rather than applied blindly.
+
+The audit method, the full findings table (including which families are safe),
+the verified version boundaries with upstream commits, and the tooling —
+`scripts/probe-shipped-flags.py`, `scripts/kernel-flag-abi.py`,
+`scripts/test-gfp-xlate.sh` — are documented in **`docs/flag-abi-drift.md`**.

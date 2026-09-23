@@ -459,6 +459,22 @@ static void shannon_bio_endio(shannon_bio_t *bio, int error)
 
 int shannon_bio_flagged(shannon_bio_t *bio, unsigned int flag)
 {
+	if (unlikely(flag >= SHANNON_BIO_FLAG_BITS)) {
+		/*
+		 * The core's only call site tests BIO_RW_PRIO (bit 16), from
+		 * host_get_head_and_set_pba_table().  On every supported kernel
+		 * bi_flags is 16 bits wide, so bio_flagged() computes
+		 * bi_flags & (1U << 16) == 0 -- and nothing in this driver ever
+		 * sets a bio flag (there is no bio_set_flag() call in the shim),
+		 * so the guarded path has been dead since v4.8.  Returning 0
+		 * reproduces existing behaviour; the warning makes it visible
+		 * rather than mysterious.  Rate-limited by shannon_warn().
+		 */
+		shannon_warn("bio flag bit %u not representable in bio->bi_flags (%u bits); always false\n",
+			     flag, (unsigned int)SHANNON_BIO_FLAG_BITS);
+		return 0;
+	}
+
 	return bio_flagged((struct bio *)bio, flag);
 }
 

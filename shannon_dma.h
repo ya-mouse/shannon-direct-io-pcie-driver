@@ -79,7 +79,8 @@ static inline int shannon_dma_set_coherent_mask(shannon_pci_dev_t *pdev, u64 mas
 
 static inline void * shannon_dma_alloc_coherent(shannon_pci_dev_t *pdev, shannon_size_t size, shannon_dma_addr_t *dma_handle, shannon_gfp_t gfp)
 {
-	return dma_alloc_coherent(&((struct pci_dev *)pdev)->dev, size, dma_handle, gfp);
+	return dma_alloc_coherent(&((struct pci_dev *)pdev)->dev, size, dma_handle,
+				  shannon_gfp_xlate(SHANNON_GFP_RAW(gfp)));
 }
 
 static inline void shannon_dma_free_coherent(shannon_pci_dev_t *pdev, shannon_size_t size, void *vaddr, shannon_dma_addr_t bus)
